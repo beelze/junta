@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<repo quality="experimental" status="unofficial">
+  <name>Junta</name>
+  <description lang="en">Yet another homebrew overlay</description>
+  <homepage>https://github.com/beelze/junta</homepage>
+  <owner type="person">
+	<email>ikonta@yandex.ru</email>
+	<email>beelzebubbie.logs@gmail.com</email>
+	<name>Anarchist</name>
+  </owner>
+  <source type="git">https://github.com/beelze/junta.git</source>
+  <source type="git">git://github.com/beelze/junta.git</source>
+  <source type="git">git@github.com:beelze/junta.git</source>
+  <feed>https://github.com/beelze/junta/commits/master.atom</feed>
+</repo>
