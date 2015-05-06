@@ -1,0 +1,16 @@
+--- lib/main/keymap.c.orig	2014-01-07 23:36:59.495684210 +0600
++++ lib/main/keymap.c	2014-01-07 23:37:17.007586641 +0600
+@@ -23,6 +23,7 @@
+ #include <string.h>
+ #include <stdio.h>
+ #include <ctype.h>
++#include <locale.h>
+ 
+ #include "xnconfig.h"
+ 
+@@ -651,5 +652,3 @@
+ 
+ 	return p;
+ }
+-
+-
