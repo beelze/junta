@@ -1,0 +1,78 @@
+--- mktorrent/mktorrent.c.old	2014-03-15 22:20:53.708196571 +0600
++++ mktorrent/mktorrent.c	2014-03-15 22:30:48.978208696 +0600
+@@ -312,25 +312,25 @@
+   exit(1);
+   }
+ otm=time(0);
+-fprintf(stdout,"done: %3d%%",cps);
++fprintf(stdout,"done: %3.2f%%", (float)cps/100);
+ fflush(stdout);
+ while((r=read(f,buf,bs))>0)
+   {
+   SHA1(buf,r,sha);
+   fwrite(sha,1,SHA_DIGEST_LENGTH,fo);
+   cnt++;
+-  cps=cnt*100/pieces;
++  cps=cnt*10000/pieces;
+   ctm=time(0);
+   if(ctm!=otm && cps!=ops)
+     {
+-    fprintf(stdout,"\rdone: %3d%%",cps);
++    fprintf(stdout,"\rdone: %3.2f%%", (float)cps/100);
+     fflush(stdout);
+     ops=cps;
+     otm=ctm;
+     }
+   }
+ close(f);
+-fprintf(stdout,"\rdone: %3d%%\n",cps);
++ fprintf(stdout,"\rdone: %3.2f%%\n", (float)cps/100);
+ fflush(stdout);
+ if(r<0)
+   {
+@@ -448,7 +448,7 @@
+ 
+ printf("Creating torrent file...\n",out_fn);
+ otm=time(0);
+-fprintf(stdout,"done: %3d%%",cps);
++fprintf(stdout,"done: %3.2f%%", (float)cps/100);
+ fflush(stdout);
+ f=0;
+ ptr=filelist;
+@@ -468,11 +468,11 @@
+     SHA1(buf,r,sha);
+     fwrite(sha,1,SHA_DIGEST_LENGTH,fo);
+     cnt++;
+-    cps=cnt*100/pieces;
++    cps=cnt*10000/pieces;
+     ctm=time(0);
+     if(ctm!=otm && cps!=ops)
+       {
+-      fprintf(stdout,"\rdone: %3d%%",cps);
++      fprintf(stdout,"\rdone: %3.2f%%", (float)cps/100);
+       fflush(stdout);
+       ops=cps;
+       otm=ctm;
+@@ -519,11 +519,11 @@
+     SHA1(buf,r,sha);
+     fwrite(sha,1,SHA_DIGEST_LENGTH,fo);
+     cnt++;
+-    cps=cnt*100/pieces;
++    cps=cnt*10000/pieces;
+     ctm=time(0);
+     if(ctm!=otm && cps!=ops)
+       {
+-      fprintf(stdout,"\rdone: %3d%%",cps);
++      fprintf(stdout,"\rdone: %3.2f%%", (float)cps/100);
+       fflush(stdout);
+       ops=cps;
+       otm=ctm;
+@@ -532,7 +532,7 @@
+   if(!f)
+     ptr=ptr->link;
+   }
+-fprintf(stdout,"\rdone: %3d%%\n",cps);
++fprintf(stdout,"\rdone: %3.2f%%\n", (float)cps/100);
+ fflush(stdout);
+ if(!(flags&F_PUB))
+   {

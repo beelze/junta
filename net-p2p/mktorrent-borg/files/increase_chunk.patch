@@ -1,0 +1,11 @@
+--- mktorrent/mktorrent.c.old	2013-10-08 00:04:32.125894242 +0600
++++ mktorrent/mktorrent.c	2013-10-08 00:04:57.626750021 +0600
+@@ -979,7 +979,7 @@
+   }
+ if(bs)
+   {
+-  if(bs<32 || bs>4096 || cnt_bits(bs)!=1)
++  if(bs<32 || bs>16384 || cnt_bits(bs)!=1)
+     {
+     printf("mktorrent: Wrong piece size specified\n");
+     return 1;
