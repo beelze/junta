@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <repo quality="experimental" status="unofficial">
-  <name>Junta</name>
+  <name>junta</name>
   <description lang="en">Yet another homebrew overlay</description>
   <homepage>https://github.com/beelze/junta</homepage>
   <owner type="person">
