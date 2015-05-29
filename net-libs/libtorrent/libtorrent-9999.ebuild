@@ -21,7 +21,8 @@ RDEPEND="
     >=dev-libs/libsigc++-2.2.2:2
     ssl? ( dev-libs/openssl )"
 DEPEND="${RDEPEND}
-    virtual/pkgconfig"
+    virtual/pkgconfig
+    dev-util/cppunit"
 
 src_unpack() {
     git-2_src_unpack
