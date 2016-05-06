@@ -1,3 +1,5 @@
+EAPI=5
+
 inherit eutils
 
 DESCRIPTION="A free cross-platform English thesaurus"
@@ -16,6 +18,12 @@ DEPEND=">=app-dicts/wordnet-3
 RDEPEND="${DEPEND}
 enchant? ( app-text/enchant )
 libnotify? ( >=x11-libs/libnotify-0.4.1 )"
+
+src_configure() {
+	# https://bugs.launchpad.net/artha/+bug/1068868
+	econf
+	sed -i "200 s/LDFLAGS = /& -Wl,--copy-dt-needed-entries /g" src/Makefile || die "patching LDFLAGS failed!"
+}
 
 src_install() {
 	make DESTDIR=${D} install || die "make install failed"
