@@ -8,8 +8,7 @@ inherit autotools eutils
 
 DESCRIPTION="In-place conversion of text typed in with a wrong keyboard layout (Punto Switcher replacement)"
 HOMEPAGE="http://www.xneur.ru/"
-#SRC_URI="http://dists.xneur.ru/release-${PV}/tgz/${P}.tar.bz2"
-SRC_URI="https://launchpad.net/~andrew-crew-kuznetsov/+archive/xneur-stable/+files/xneur_${PV}.orig.tar.gz"
+SRC_URI="https://launchpad.net/~andrew-crew-kuznetsov/+archive/xneur-stable/+files/xneur_${PV}+git5.orig.tar.gz"
 
 LICENSE="GPL-2"
 SLOT="0"
@@ -47,7 +46,7 @@ src_prepare() {
 	rm -f m4/{lt~obsolete,ltoptions,ltsugar,ltversion,libtool}.m4 \
 		ltmain.sh aclocal.m4 || die
 
-	sed -i -e "s/-Werror -g0//" configure.in || die
+	sed -i -e "s/-Werror -g0//" configure.ac || die
 	sed -i -e 's/@LDFLAGS@ //' xnconfig.pc.in || die
 	epatch "${FILESDIR}/locale-h.patch"
 	eautoreconf
