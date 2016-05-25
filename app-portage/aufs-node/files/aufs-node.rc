@@ -1,0 +1,752 @@
+#!/sbin/runscript
+
+extra_commands="xstatus"
+extra_started_commands="xrestart dirty enable_aufs disable_aufs ro rw"
+extra_stopped_commands="build unzap"
+description="implement fast read/write in-memory filesystem nodes"
+description_xstatus="display extended status; 'noformat' (for easy output parsing) flag can be supplied to stdin, e.g. 'echo noformat | aufs-node.NODE xstatus'"
+description_build="create images from 'real' filesystem nodes; 'anyowner' (allows creating image regardless of [gu]id_NODE restrictions) or/and 'emptytree' (allows creating image from empty tree) flags can be supplied to stdin, e.g. 'echo anyowner,emptytree | aufs-node.NODE build'"
+description_dirty='inverts "dirty" flag (causes unconditional image rebuild on stop)'
+description_enable_aufs='enable read-write mode (if disabled by disable_aufs command or config)'
+description_disable_aufs='disable read-write mode'
+description_rw='synonym for enable_aufs'
+description_ro='synonym for disable_aufs'
+description_xrestart='restart if aufs changed (or marked dirty)'
+description_unzap='mark service started'
+
+depend() {
+	need localmount
+	after bootmisc
+}
+
+declare -a ERRORS
+NODE=
+FSRW=
+OF_CHECK_INTERVAL=2
+READONLY_OP_LVL=0
+DEFAULT_BACKUP_CNT=1
+DEFAULT_MKSQUASH_OPTS='-no-duplicates -no-progress'
+
+START_OPS=( 'mount -rt squashfs -o loop,nodev,noexec,nosuid "$(cfg_param image)" "$(cfg_param mount)"' \
+            'create_tmpfs_node' \
+            'mount -t aufs -o "nodev,noexec,nosuid,br:$FSRW=rw:$(cfg_param mount)=ro" aufs "$(cfg_param mount)"' \
+            'cfg_param mtime $(stat -c%Y "$FSRW")'
+)
+START_OPS_NAMES=( 'mounting squashfs (ro)' \
+                  'creating tmpfs nodes' \
+                  'mounting aufs (rw)' \
+                  'saving nodes mtime'
+)
+STOP_OPS=( 'mount | grep -Es "$(cfg_param mount).*type.*squashfs" >/dev/null && umount -f -l -t squashfs "$(cfg_param mount)" || \
+            { echo "squashfs not mounted"; return 1; }' \
+           'rm -r "$FSRW"' \
+           'mount | grep -Es "$(cfg_param mount).*type.*aufs" >/dev/null && umount -f -l -t aufs "$(cfg_param mount)" || \
+            { echo "not mounted as aufs"; return 1; }' \
+           ''
+)
+STOP_OPS_NAMES=( 'unmounting squashfs' \
+                 'removing tmpfs nodes' \
+                 'unmounting aufs' \
+                 ''
+)
+
+# $1 - flag
+test_input_flag() {
+    if [[ -z $INPUT_READ ]]; then
+        INPUT_READ=1
+        read -t 0 || return 1
+        read -t 1 INPUT_FLAGS
+    fi
+    [[ "$INPUT_FLAGS" =~ (^|[^[:alnum:]_])${1}([^[:alnum:]_]|$) ]]
+}
+
+# $1 - delimiter, rest - array elements
+join() {
+    local delim="$1"; shift
+    local out=$(printf "${delim}%s" "$@" )
+    echo -e "${out#${delim}}"
+    return 0
+}
+
+# $1 - text, $2 - ecommand (default einfo)
+erows() {
+    local cmd=${2:-einfo}
+    ( IFS=$'\n';
+      for i in $1; do
+          $cmd "$i"
+      done )
+}
+
+# 1 - str, 2 - [!]
+yesno_str() {
+    local condition="$2 yesno $1"
+    eval "$condition" && echo -n 'yes' || echo -n 'no'
+}
+
+show_errors() {
+    local l
+    [[ -z ${ERRORS[@]} ]] && return 1
+    for l in "${ERRORS[@]}"; do eerror "$l"; done
+    return 0
+}
+
+pre_checks() {
+    NODE="${SVCNAME#aufs-node}"
+    if [[ ! -n "$NODE" ]]; then
+        ERRORS+=("You are not supposed to run this script directly,")
+        ERRORS+=("  create a symlink for node (ln -s aufs-node aufs-node.NODE)")
+        ERRORS+=("  and modify config file (/etc/conf.d/aufs-node) appropriately")
+    else
+        NODE="${NODE#.}"
+    fi
+    [[ -x $(which mksquashfs 2>/dev/null) && -x $(which unsquashfs 2>/dev/null) ]] || \
+        ERRORS+=("sys-fs/squashfs-tools is not installed")
+    [[ -x $(which fuser 2>/dev/null) || -x $(which lsof 2>/dev/null) ]] || \
+        { ERRORS+=("neither lsof (sys-process/lsof) nor");
+          ERRORS+=("  fuser (sys-process/psmisc) is not installed"); }
+    [[ -w /dev/loop0 ]] || ERRORS+=('no loopback support')
+    grep -s squashfs /proc/filesystems >/dev/null || ERRORS+=('no squashfs support')
+    [[ -n "$(cfg_param view mount)" ]] || ERRORS+=("no node definition (check 'mount_$NODE' parameter in /etc/conf.d/aufs-node)")
+}
+
+check_config() {
+    local tmp= tmp1=
+
+    tmp=$(mksquashfs -h 2>&1); tmp=${tmp#*Compressors available:$'\n'}; tmp=${tmp%%$'\n'-[a-z]*}
+    cfg_param 'compressors' "$(echo -e "$tmp" | awk 'BEGIN {ORS=" "} {print $1}')"
+
+    cfg_param load 'mount'
+    cfg_param load 'image'
+    cfg_param load 'compression'
+    cfg_param load 'fallback_compression'
+    cfg_param load 'uid'
+    cfg_param load 'gid'
+    #cfg_param load 'allowed_mode'
+    cfg_param load 'aufs_mode'
+    cfg_param load 'wait_close'
+    cfg_param load 'disable_aufs'
+    cfg_param load 'backup'
+    cfg_param load 'mksquashfs_opts'
+
+    tmp="$(cfg_param mount)"
+	if [[ "$tmp" == */ ]]; then
+		tmp="${tmp%/}"
+		cfg_param mount "$tmp"
+	fi
+
+    if [[ -d "$tmp" ]]; then
+        [[ -z "$(cfg_param image)" ]] && cfg_param image "${tmp}.sqfs"
+    else
+        ERRORS+=("invalid mountpoint: '$tmp'")
+    fi
+
+    tmp="$(cfg_param compression)"; tmp1="$(cfg_param compressors)"
+    if [[ ! "$tmp1" =~ (^| )"$tmp"( |$) ]]; then
+        if yesno "$(cfg_param fallback_compression)"; then
+            cfg_param compression "${tmp1%% *}"
+            ewarn "compression not supported: '$tmp', falling back to ${tmp1%% *}"
+        else
+            ERRORS+=("compression not supported: '$tmp'")
+        fi
+    fi
+
+    tmp=$(cfg_param uid)
+    if [[ -n $tmp ]]; then
+        tmp1=$(getent passwd $tmp | cut -d: -f1)
+        [[ -n $tmp1 ]] && cfg_param uid $tmp1 || ERRORS+=("invalid uid: '$tmp'")
+    fi
+    tmp=$(cfg_param gid)
+    if [[ -n $tmp ]]; then
+        tmp1=$(getent group $tmp | cut -d: -f1)
+        [[ -n $tmp1 ]] && cfg_param gid $tmp1 || ERRORS+=("invalid gid: '$tmp'")
+    fi
+
+    tmp=$(cfg_param wait_close)
+    [[ -z $tmp || $tmp =~ ^[0-9]+$ ]] || ERRORS+=("invalid wait_close: '$tmp'")
+    [[ -z $tmp ]] && cfg_param wait_close 0
+
+    tmp=$(cfg_param backup)
+    if [[ -n "$tmp" ]]; then
+        [[ $tmp =~ ^[0-9]+$ ]] || ERRORS+=("invalid backup: '$tmp'")
+    else
+        cfg_param backup $DEFAULT_BACKUP_CNT
+    fi
+
+    [[ -x $(which lsof 2>/dev/null) ]] && cfg_param lsof 'yes' || cfg_param lsof 'no'
+
+    FSRW=$(get_FSRW)
+}
+
+# $1 - action, $n - parameters
+opened_files_action() {
+    local can_lsof=$(cfg_param lsof) mnt="$(cfg_param mount)" tmp=
+    case "$1" in
+        check)
+            if ! yesno $can_lsof; then
+                tmp="$(fuser -m "$mnt" -v 2>&1)" || return 1
+                echo -e "$tmp" | grep -Ev 'kernel.*mount' | grep -Eo '[^ ].*'
+                return 0
+            else
+                tmp="$(lsof -w -X +D $mnt)"
+                echo -e "$tmp" | grep -Eq 'COMMAND.*PID.*USER' || return 1
+                (( $(echo -e "$tmp" | wc -l)>1 )) || return 1
+                echo -e "$tmp"
+                return 0
+            fi
+            ;;
+        kill) # $2 - signal
+            if ! yesno $can_lsof; then
+                fuser -m "$mnt" -k -${2}
+            else
+                local tmp=$(lsof -t -w -X +D "$mnt")
+                [[ -n "$tmp" ]] && kill -s ${2} $tmp
+            fi
+            ;;
+    esac
+}
+
+handle_opened_files() {
+    local msg= ts=
+    yesno $(cfg_param disable_aufs) && return 0
+
+    if msg=$(opened_files_action check); then
+        if [[ $RC_RUNLEVEL == 'shutdown' ]]; then
+            local ts=$(cfg_param wait_close)
+            if (( ts>0 )); then
+                ebegin "some files are open, waiting ${ts} sec"
+                (( ts=$(date +%s)+ts ))
+                while (( $(date +%s)<ts )); do
+                    sleep $OF_CHECK_INTERVAL
+                    opened_files_action check >/dev/null || { eend 0; return 0; }
+                done
+                eend 1
+            fi
+            ebegin 'files are still open, killing with INT'
+            opened_files_action kill 'INT'
+            sleep $OF_CHECK_INTERVAL
+            opened_files_action check >/dev/null || { eend 0; return 0; }
+            eend 1
+
+            ebegin '...no problem, trying TERM'
+            opened_files_action kill 'TERM'
+            sleep $OF_CHECK_INTERVAL
+            opened_files_action check >/dev/null || { eend 0; return 0; }
+            eend 1
+
+            ebegin '...KILL is the only way'
+            opened_files_action kill 'KILL'
+            sleep 1
+            opened_files_action check >/dev/null || { eend 0; return 0; }
+            eend 1 "it's useless... ignoring"
+            return 0
+        else
+            eerror 'aborting, some files are open:'
+            eindent
+            erows "$msg" ewarn
+            eoutdent
+            return 1
+        fi
+    else
+        return 0
+    fi
+}
+
+start_init() {
+    is_mountpoint_empty || ERRORS+=("mountpoint '$(cfg_param mount)' is not empty")
+
+    grep -s aufs /proc/filesystems >/dev/null && cfg_param no_aufs 'no' || \
+        { cfg_param no_aufs 'yes'; cfg_param disable_aufs 'yes'; }
+
+    cfg_param dirty 'no'
+}
+
+check_image() {
+    local img="$(cfg_param image)" tmp= tmp1= uid= gid=
+    if [[ -f "$img" ]]; then
+        if file -b "$img" | grep -i ^squashfs > /dev/null; then
+            if tmp=$(unsquashfs -ll "$img" squashfs-root | head -n 10 | grep -s squashfs-root$); then
+                #tmp1=$(cfg_param 'allowed_mode')
+                #set -- $tmp
+                #[[ -z $tmp1 || $1 =~ ^d${tmp1}$ ]] || \
+                    #ERRORS+=("$img: invalid root mode: [$1]")
+                #tmp=${2////:}
+
+                set -- $tmp; set -- ${2//// } # $1,2 - user,group
+                tmp=$(cfg_param uid)
+                [[ -n $tmp ]] && { [[ $tmp == $1 ]] || ERRORS+=("$img: invalid root uid ($1), expected $tmp"); }
+                tmp=$(cfg_param gid)
+                [[ -n $tmp ]] && { [[ $tmp == $2 ]] || ERRORS+=("$img: invalid root gid ($2), expected $tmp"); }
+
+                #uid=$(cfg_param 'uid'); gid=$(cfg_param 'gid')
+                #[[ $tmp == ${uid}:${gid} ]] || \
+                    #{ ERRORS+=("$img: invalid root owner,")
+                      #ERRORS+=("  got $tmp, expected ${uid}:${gid}"); }
+            else
+                ERRORS+=("unexpected error when listing files from image '$img': $tmp")
+            fi
+        else
+            ERRORS+=("invalid image '$img' (not a squashfs image)")
+        fi
+    else
+        ERRORS+=("image '$img' not found or not a regular file")
+    fi
+}
+
+get_FSRW() {
+    echo -n "/dev/shm/.${SVCNAME}_$(path_hash $(cfg_param image))"
+}
+
+create_tmpfs_node() {
+    local tmp=
+    local -a msg
+    if mkdir -p "$FSRW"; then
+        tmp=$(cfg_param uid)
+        [[ -n $tmp ]] && { chown $tmp "$FSRW" && msg+=("uid set: $tmp") || return 1; }
+        tmp=$(cfg_param gid)
+        [[ -n $tmp ]] && { chgrp $tmp "$FSRW" && msg+=("gid set: $tmp") || return 1; }
+
+        local mode=$(cfg_param aufs_mode)
+        if [[ -n $mode ]]; then
+            chmod $mode "$FSRW" && msg+=("mode set: $mode") || return 1
+        else
+            chmod --reference="$(cfg_param mount)" "$FSRW" || return 1
+        fi
+        [[ ${#msg[@]} -ne 0 ]] && join ', ' "${msg[@]}"
+    fi
+}
+
+path_hash() {
+    local string=$(realpath -m "$1")
+    #local format="${2:-"%x"}"
+    #local crc=0
+    #local c i j xor_poly
+
+    #for ((i=0; i<${#string}; i++)); do
+        #c=$(printf "%d" "'${string:i:1}")
+        #for ((j=0; j<8; c>>=1, j++)); do
+            #(( xor_poly = (c ^ crc) & 1 ))
+            #(( crc >>= 1 ))
+            #(( xor_poly )) && (( crc ^= 0xA001 ))
+        #done
+    #done
+    #printf "$format" "$crc"
+    echo -e '#coding: utf-8\nimport hashlib\nprint(hashlib.md5(u"'${string}'".encode("utf8")).hexdigest())' | \
+        python
+}
+
+aufs_changed() {
+    yesno $(cfg_param disable_aufs) && return 1
+    local cur=$(stat -c%Y "$FSRW") saved=$(cfg_param mtime)
+    [[ $cur =~ ^[0-9]+$ && $saved =~ ^[0-9]+$ && $cur -gt $saved ]]
+}
+
+image_or_node_in_use() {
+    ls /dev/shm/.${SVCNAME}_* >/dev/null 2>&1 && return 0
+    ls /dev/shm/.aufs-node.*_$(path_hash $(cfg_param image)) >/dev/null 2>&1
+}
+
+is_mountpoint_empty() {
+    (( ! $(ls -1 "$(cfg_param mount)" | wc -l) ))
+}
+
+# a) param – get param value
+# b) load param – load value of param from config
+# c) view param – print value of param from config
+# d) param value – set param value
+
+cfg_param() {
+    if [[ $# -gt 1 ]]; then
+        case $1 in
+            load|view)
+                local tmp="$2_$NODE"
+                [[ $1 == 'load' ]] && service_set_value $2 "${!tmp}" || echo -n "${!tmp}"
+                ;;
+            *)
+                service_set_value $1 "$2"
+                ;;
+        esac
+    else
+        service_get_value $1
+    fi
+}
+
+# $1 - image
+create_image() {
+    local comp=$(cfg_param compression) opts= tmp=
+
+    opts="$(cfg_param load mksquashfs_opts) -comp $comp"
+    tmp=$(cfg_param uid)
+    [[ -n $tmp ]] && opts="$opts -force-uid $tmp"
+    tmp=$(cfg_param gid)
+    [[ -n $tmp ]] && opts="$opts -force-gid $tmp"
+
+    rm -f "$1"
+    mksquashfs "$(cfg_param mount)" "$1" $DEFAULT_MKSQUASH_OPTS $opts 2>&1 || rm -f "$1"
+}
+
+rebuild() {
+    local msg= img="$(cfg_param image)"
+    if aufs_changed; then
+        msg='node content changed'
+    else
+        if yesno $(cfg_param dirty); then
+            msg='dirty flag set'
+        fi
+    fi
+
+    if [[ -n $msg ]]; then
+        einfo "node image will be rebuilt ($msg)"
+        eindent
+
+        einfo "creating image [$(cfg_param compression)] ..."
+
+        if ! msg=$(create_image "$img.~"); then
+            eindent
+            eerror "failed: $msg"
+            eoutdent
+        else
+            einfo 'processing backups ...'
+            eindent; backup; eoutdent
+            mv "${img}.~" "${img}"
+        fi
+        eoutdent
+        einfo 'rebuild completed'
+    fi
+}
+
+backup() {
+    local -a idxs
+    local img=$(cfg_param image) cnt=$(cfg_param backup) i= tmp=
+    idxs=($( shopt -qs extglob;
+             eval 'ls -1 "$img".+([0-9]) 2>/dev/null' | cut -c $((${#img}+2))- | sort -n ))
+    # delete unneeded backup files
+    for ((i=${#idxs[@]}-1; i>cnt-2; i--)); do
+        tmp=$(rm "$img.${idxs[i]}" 2>&1) || eerror "$tmp"
+    done
+    # rename rest of them
+    local j=cnt-2; ((j>=${#idxs[@]})) && ((j=${#idxs[@]}-1))
+    for ((i=j; i>=0; i--)); do
+        tmp=$(mv "$img.${idxs[i]}" "$img.$((idxs[i]+1))" 2>&1) || eerror "$tmp"
+    done
+    ((cnt==0)) && \
+        { tmp=$(rm "$img" 2>&1) || eerror "$tmp"; } || \
+        { tmp=$(mv "$img" "$img.1" 2>&1) || eerror "$tmp"; }
+}
+
+start_ops() {
+    local cnt=${#START_OPS[@]}
+    yesno $(cfg_param disable_aufs) && cnt=$READONLY_OP_LVL
+    do_ops START 0 1 $cnt
+}
+
+stop_ops() {
+    do_ops STOP $(cfg_param op_lvl) -1 0
+}
+
+# what, start, step, end
+do_ops() {
+    local -a ops opnames
+    local iop= tmp= res=
+    [[ $1 == 'START' ]] &&
+        { ops=("${START_OPS[@]}"); opnames=("${START_OPS_NAMES[@]}"); } || \
+        { ops=("${STOP_OPS[@]}"); opnames=("${STOP_OPS_NAMES[@]}"); }
+    eindent
+    for iop in $(seq $2 $3 $4); do
+        if [[ -n "${ops[iop]}" ]]; then
+            cfg_param op_lvl $iop
+            ebegin "${opnames[iop]}"
+
+            eindent
+            tmp=$(exec 2>&1; eval "${ops[iop]}"); res=$?
+            [[ $res -eq 0 && -n "$tmp" ]] && einfo "$tmp"
+            eoutdent
+
+            eend $res "$tmp" || { [[ $1 == 'START' ]] && eoutdent && return 1; }
+        fi
+    done
+    eoutdent; return 0
+}
+
+#####
+
+dirty() {
+    pre_checks
+    show_errors && return 1
+
+    if yesno $(cfg_param disable_aufs); then
+        eerror 'mounted as read-only'
+        return 1
+    fi
+
+    if ! yesno $(cfg_param dirty); then
+        einfo 'dirty flag set, rebuild will be forced'
+        cfg_param dirty 'yes'
+    else
+        einfo 'dirty flag unset'
+        cfg_param dirty 'no'
+    fi
+}
+
+start() {
+    pre_checks
+    show_errors && return 1
+    check_config
+    show_errors && return 1
+    check_image
+    show_errors && return 1
+    start_init
+    show_errors && return 1
+
+    if image_or_node_in_use; then
+        ERRORS+=('node or image is in use!')
+        show_errors; return 1
+    fi
+
+    if yesno $(cfg_param disable_aufs); then
+        if yesno $(cfg_param no_aufs); then
+            ewarn 'no aufs support, read-only mode forced'
+        else
+            ewarn 'aufs support disabled (config), mounting read-only'
+        fi
+    fi
+
+    ebegin "starting $SVCNAME"
+    if start_ops; then
+        mark_service_started
+    else
+        eerror 'start failed, rolling back!'
+        stop_ops
+        return 1
+    fi
+}
+
+stop() {
+    pre_checks
+    show_errors && return 1
+    check_config
+    show_errors && return 1
+
+    if handle_opened_files; then
+        rebuild
+        ebegin "stopping $SVCNAME"
+        stop_ops && mark_service_stopped
+    else
+        return 1
+    fi
+}
+
+xrestart() {
+	einfo "restarting $SVCNAME"
+    pre_checks
+    show_errors && return 1
+    FSRW=$(get_FSRW)
+
+    if aufs_changed || yesno $(cfg_param dirty); then
+        stop && start
+    else
+        einfo 'no restart needed'
+        return 0
+    fi
+}
+
+allow_empty_tree() {
+    pre_checks
+    show_errors && return 1
+    cfg_param allow_empty_tree 'yes'
+}
+
+allow_any_owner() {
+    pre_checks
+    show_errors && return 1
+    cfg_param allow_any_owner 'yes'
+}
+
+enable_aufs() {
+    pre_checks
+    show_errors && return 1
+
+    yesno $(cfg_param no_aufs) && { eerror 'no aufs support'; return 1; }
+    yesno $(cfg_param disable_aufs) || { eerror 'aufs already enabled'; return 1; }
+    local lvl=$(cfg_param op_lvl)
+    (( lvl!=READONLY_OP_LVL )) && { eerror "unexpected: op_lvl is wrong ($lvl)"; return 1; }
+
+    ebegin "enabling aufs on $SVCNAME"
+    FSRW=$(get_FSRW)
+    if do_ops START 1 1 ${#START_OPS[@]}; then
+        cfg_param disable_aufs 'no'
+    else
+        eerror 'enabling aufs failed, rolling back!'
+        do_ops STOP $(cfg_param op_lvl) -1 $((lvl+1))
+        cfg_param op_lvl $READONLY_OP_LVL
+        return 1
+    fi
+}
+
+disable_aufs() {
+    pre_checks
+    show_errors && return 1
+
+    yesno $(cfg_param disable_aufs) && { eerror 'aufs already disabled or not supported'; return 1; }
+    local lvl=$(cfg_param op_lvl)
+    (( lvl!=${#START_OPS[@]}-1 )) && { eerror "unexpected: op_lvl is wrong ($lvl)"; return 1; }
+    if handle_opened_files; then
+        ebegin "disabling aufs on $SVCNAME"
+        FSRW=$(get_FSRW)
+        if do_ops STOP $(cfg_param op_lvl) -1 $((READONLY_OP_LVL+1)); then
+            cfg_param disable_aufs 'yes'
+            cfg_param dirty 'no'
+            cfg_param op_lvl $READONLY_OP_LVL
+            return 0
+        else
+            return 1
+        fi
+    else
+        return 1
+    fi
+}
+
+rw() {
+    enable_aufs
+}
+
+ro() {
+    disable_aufs
+}
+
+build() {
+    local tmp= msg=
+
+    pre_checks
+    show_errors && return 1
+    check_config
+    show_errors && return 1
+
+    ebegin "building image of $SVCNAME"
+
+    local mnt="$(cfg_param mount)" img="$(cfg_param image)"
+    local uid=$(cfg_param uid) gid=$(cfg_param gid)
+
+    [[ -e "$img" ]] && { eerror "image '$img' already exists"; return 1; }
+
+    tmp=$(stat -c%U "$mnt")
+    if [[ -n $uid && $uid != $tmp ]]; then
+        msg="tree owner uid is '$tmp', expected '$uid'"
+        if test_input_flag anyowner; then
+            ewarn "[overridden] $msg"
+        else
+            eerror "$msg (see build command description)"
+            return 1
+        fi
+    fi
+    tmp=$(stat -c%G "$mnt")
+    if [[ -n $gid && $gid != $tmp ]]; then
+        msg="tree owner gid is '$tmp', expected '$gid'"
+        if test_input_flag anyowner; then
+            ewarn "[overridden] $msg"
+        else
+            eerror "$msg (see build command description)"
+            return 1
+        fi
+    fi
+
+    if is_mountpoint_empty; then
+        msg="'$mnt' tree is empty"
+        if test_input_flag emptytree; then
+            ewarn "[overridden] $msg"
+        else
+            eerror "$msg (see build command description)"
+            return 1
+        fi
+    fi
+
+    einfo "creating image [$(cfg_param compression)] ..."
+
+    if ! msg=$(create_image "$img"); then
+        eindent
+        eerror "failed: $msg"
+        eoutdent
+        return 1
+    else
+        einfo 'completed successfully'
+        eindent
+        einfo "... now you should clear source tree with 'rm -rf $mnt/*'"
+        einfo "and mount image with 'start' command"
+        eoutdent
+    fi
+}
+
+xstatus() {
+    pre_checks
+    show_errors && return 1
+	test_input_flag noformat; local noformat=$?
+
+	local sqinfo="$(mksquashfs -version | head -n1), compressors: $(cfg_param compressors)"
+
+    if [[ $noformat -ne 0 ]]; then
+		einfo "squashfs-tools info  : $sqinfo"
+	else
+        echo "sqinfo $sqinfo"
+	fi
+
+    if service_started; then
+        FSRW=$(get_FSRW)
+        local img="$(cfg_param image)" mnt="$(cfg_param mount)" ro=$(cfg_param disable_aufs)
+        local aufs_modified='n/a' aufs_mode='n/a' dirty='n/a' of='n/a'
+        local owner="$(stat -c%U:%G $mnt)"
+        local aufs_supported=$(yesno_str $(cfg_param no_aufs) '!')
+        local aufs_enabled=$(yesno_str $ro '!')
+
+        if ! yesno $ro; then
+            aufs_mode=$(stat -c%a "$FSRW")
+            aufs_mtime=$(date -d @$(stat -c%Y "$FSRW"))
+            aufs_modified=$(aufs_changed && echo yes || echo no)
+            dirty=$(yesno_str $(cfg_param dirty))
+        fi
+
+        if [[ $noformat -ne 0 ]]; then
+            einfo "image                : $img"
+            eindent
+            erows "$(unsquashfs -s "$img")"
+            eoutdent
+            einfo "mounted              : $mnt"
+            einfo "mountpoint owner     : $owner"
+            einfo "aufs supported       : $aufs_supported"
+            einfo "aufs enabled         : $aufs_enabled"
+            if ! yesno $ro; then
+                einfo "aufs mode            : $aufs_mode"
+                einfo "aufs dir (FSRW)      : $FSRW"
+                einfo "aufs changed         : $aufs_modified"
+                einfo "aufs mtime           : $aufs_mtime"
+                einfo "dirty flag set       : $dirty"
+                local of
+                if of="$(opened_files_action check)"; then
+                    einfo 'files currently open : yes'
+                    eindent
+                    erows "$of"
+                    eoutdent
+                else
+                    einfo 'files currently open : no'
+                fi
+            fi
+            status
+        else
+            echo "image $img"
+            echo "mount $mnt"
+            echo "owner $owner"
+            echo "aufs $aufs_supported"
+            echo "rw $aufs_enabled"
+            echo "mode $aufs_mode"
+            echo "FSRW $FSRW"
+            echo "modified $aufs_modified"
+            echo "mtime $aufs_mtime"
+            echo "dirty $dirty"
+            yesno $ro || { of="$(opened_files_action check)" && of='yes' || of='no'; }
+            echo "busy $of"
+            status > /dev/null
+        fi
+    fi
+}
+
+unzap () {
+    mark_service_started
+}
