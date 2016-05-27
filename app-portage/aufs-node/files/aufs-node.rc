@@ -127,6 +127,7 @@ check_config() {
     cfg_param load 'disable_aufs'
     cfg_param load 'backup'
     cfg_param load 'mksquashfs_opts'
+    cfg_param load 'force_fuser'
 
     tmp="$(cfg_param mount)"
 	if [[ "$tmp" == */ ]]; then
@@ -172,7 +173,16 @@ check_config() {
         cfg_param backup $DEFAULT_BACKUP_CNT
     fi
 
-    [[ -x $(which lsof 2>/dev/null) ]] && cfg_param lsof 'yes' || cfg_param lsof 'no'
+    if [[ -x $(which lsof 2>/dev/null) ]]; then
+		if [[ -x $(which fuser 2>/dev/null) ]] && yesno "$(cfg_param force_fuser)"; then
+			tmp='no'
+		else
+			tmp='yes'
+		fi
+	else
+		tmp='no'
+	fi
+	cfg_param lsof $tmp
 
     FSRW=$(get_FSRW)
 }
@@ -184,16 +194,16 @@ opened_files_action() {
         check)
             if ! yesno $can_lsof; then
                 tmp="$(fuser -m "$mnt" -v 2>&1)" || return 1
-                echo -e "$tmp" | grep -Ev 'kernel.*mount' | grep -Eo '[^ ].*'
-                return 0
+                tmp="$(echo -e "$tmp" | grep -Ev 'kernel.*mount' | grep -Eo '[^ ].*')"
             else
                 tmp="$(lsof -w -X +D $mnt)"
                 echo -e "$tmp" | grep -Eq 'COMMAND.*PID.*USER' || return 1
-                (( $(echo -e "$tmp" | wc -l)>1 )) || return 1
-                echo -e "$tmp"
-                return 0
             fi
+            (( $(echo -e "$tmp" | wc -l)>1 )) || return 1
+            echo -e "$tmp"
+            return 0
             ;;
+
         kill) # $2 - signal
             if ! yesno $can_lsof; then
                 fuser -m "$mnt" -k -${2}
@@ -681,11 +691,14 @@ xstatus() {
 	test_input_flag noformat; local noformat=$?
 
 	local sqinfo="$(mksquashfs -version | head -n1), compressors: $(cfg_param compressors)"
+	local can_lsof="$(cfg_param lsof)"
 
     if [[ $noformat -ne 0 ]]; then
 		einfo "squashfs-tools info  : $sqinfo"
+		einfo "use lsof             : $can_lsof"
 	else
         echo "sqinfo $sqinfo"
+        echo "lsof $can_lsof"
 	fi
 
     if service_started; then
@@ -695,10 +708,12 @@ xstatus() {
         local owner="$(stat -c%U:%G $mnt)"
         local aufs_supported=$(yesno_str $(cfg_param no_aufs) '!')
         local aufs_enabled=$(yesno_str $ro '!')
+		local
 
         if ! yesno $ro; then
             aufs_mode=$(stat -c%a "$FSRW")
             aufs_mtime=$(date -d @$(stat -c%Y "$FSRW"))
+            aufs_saved_mtime=$(date -d @$(cfg_param mtime))
             aufs_modified=$(aufs_changed && echo yes || echo no)
             dirty=$(yesno_str $(cfg_param dirty))
         fi
@@ -716,7 +731,7 @@ xstatus() {
                 einfo "aufs mode            : $aufs_mode"
                 einfo "aufs dir (FSRW)      : $FSRW"
                 einfo "aufs changed         : $aufs_modified"
-                einfo "aufs mtime           : $aufs_mtime"
+                einfo "aufs mtime(|initial) : $aufs_mtime | $aufs_saved_mtime"
                 einfo "dirty flag set       : $dirty"
                 local of
                 if of="$(opened_files_action check)"; then
@@ -738,7 +753,7 @@ xstatus() {
             echo "mode $aufs_mode"
             echo "FSRW $FSRW"
             echo "modified $aufs_modified"
-            echo "mtime $aufs_mtime"
+            echo "mtimes $aufs_mtime | $aufs_saved_mtime"
             echo "dirty $dirty"
             yesno $ro || { of="$(opened_files_action check)" && of='yes' || of='no'; }
             echo "busy $of"
