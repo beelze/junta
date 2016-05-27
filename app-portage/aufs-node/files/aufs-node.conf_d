@@ -22,7 +22,6 @@ aufs_mode_gentoo=770
 ## DEFERRED!!! if set, root node will be checked against
 ## allowed_mode_gentoo=
 
-#date; lsof -w -X +D /usr/portage/gentoo; date
 # if there are open files in mounted tree, wait N seconds, then abort
 # if runlevel is shutdown, wait N seconds before terminate all processes owning those opened files
 # default – act immediately
@@ -40,6 +39,10 @@ backup_gentoo=3
 # do not use here -force-[ug]id and -comp options, use instead [gi]d_portage_NODE and compression_NODE
 mksquashfs_opts_gentoo='-no-exports -no-xattrs -always-use-fragments -Xcompression-level 9'
 
+# prefer fuser over lsof check for opened files (faster, but if available)
+# yes - "force", otherwise - auto (use lsof, fuser is fallback option)
+force_fuser_gentoo=yes
+
 mount_layman="/usr/portage/layman/"
 image_layman=
 compression_layman=lzo
@@ -51,15 +54,4 @@ wait_close_layman=5
 disable_aufs_layman=no
 backup_layman=3
 mksquashfs_opts_layman='-no-exports -no-xattrs -always-use-fragments -Xcompression-level 9'
-
-mount_local="/usr/portage/local"
-image_local=
-compression_local=lzo
-fallback_compression_local=yes
-uid_local=portage
-gid_local=portage
-aufs_mode_local=770
-wait_close_local=5
-disable_aufs_local=no
-backup_local=5
-mksquashfs_opts_local='-no-exports'
+force_fuser_layman=yes
