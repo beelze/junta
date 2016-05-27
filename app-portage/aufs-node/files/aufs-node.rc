@@ -1,4 +1,4 @@
-#!/sbin/runscript
+#!/sbin/openrc-run
 
 extra_commands="xstatus"
 extra_started_commands="xrestart dirty enable_aufs disable_aufs ro rw"
@@ -112,8 +112,8 @@ pre_checks() {
 check_config() {
     local tmp= tmp1=
 
-    tmp=$(mksquashfs -h 2>&1); tmp=${tmp#*Compressors available:$'\n'}; tmp=${tmp%%$'\n'-[a-z]*}
-    cfg_param 'compressors' "$(echo -e "$tmp" | awk 'BEGIN {ORS=" "} {print $1}')"
+    tmp=$(unsquashfs 2>&1 -h | awk '{if($0~"^Decompressors available:"){a=1; next;}; if(a==1) print $1;}' | paste -s -d' ')
+    cfg_param 'compressors' "$tmp"
 
     cfg_param load 'mount'
     cfg_param load 'image'
@@ -145,7 +145,7 @@ check_config() {
     if [[ ! "$tmp1" =~ (^| )"$tmp"( |$) ]]; then
         if yesno "$(cfg_param fallback_compression)"; then
             cfg_param compression "${tmp1%% *}"
-            ewarn "compression not supported: '$tmp', falling back to ${tmp1%% *}"
+            ewarn "compression not supported: '$tmp', falling back to '${tmp1%% *}'"
         else
             ERRORS+=("compression not supported: '$tmp'")
         fi
@@ -708,7 +708,6 @@ xstatus() {
         local owner="$(stat -c%U:%G $mnt)"
         local aufs_supported=$(yesno_str $(cfg_param no_aufs) '!')
         local aufs_enabled=$(yesno_str $ro '!')
-		local
 
         if ! yesno $ro; then
             aufs_mode=$(stat -c%a "$FSRW")
