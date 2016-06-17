@@ -4,10 +4,10 @@
 # $Id$
 
 depend() {
-	use net
+	need net
 	before dns
-	after logger
-	provide cryptodns
+	use logger
+#	provide cryptodns
 }
 
 DAEMON=/usr/sbin/dnscrypt-proxy
@@ -24,20 +24,13 @@ DNSCRYPT_RESOLVERS_FILE=${DNSCRYPT_RESOLVERS_FILE:-/usr/share/dnscrypt-proxy/dns
 
 rundir=/var/run/${SVCNAME}
 pidfile="$rundir/dnscrypt-proxy.pid"
-outfile="$rundir/out.log"
-
-declare -a LINES
-
-# retval
-elines() {
-    local l
-    for l in "${LINES[@]}"; do
-		[[ $1 -eq 0 ]] && einfo "$l" || eerror "$l"
-	done
-    return 0
-}
 
 check() {
+    local l
+	declare -a LINES
+
+	ebegin "Checking $SVCNAME"
+
 	if [[ $DNSCRYPT_MODE == 'name' ]]; then
 		[[ -n $DNSCRYPT_RESOLVER_NAME ]] || LINES+=("DNSCRYPT_RESOLVER_NAME not set")
 		[[ -s "$DNSCRYPT_RESOLVERS_FILE" ]] || LINES+=("DNSCRYPT_RESOLVERS_FILE not set or not a non-empty file: '$DNSCRYPT_RESOLVERS_FILE'")
@@ -49,22 +42,21 @@ check() {
 		LINES+=("invalid DNSCRYPT_MODE: '$DNSCRYPT_MODE', expected 'name' or 'ip'")
 	fi
 	[[ -n $DNSCRYPT_LOCAL_ADDRESS ]] || LINES+=("DNSCRYPT_LOCAL_ADDRESS not set, expected ip[:port]")
-	[[ -z ${LINES[@]} ]]
+
+	if [[ -z ${LINES[@]} ]]; then
+		eend 0
+	else
+		eindent
+		for l in "${LINES[@]}"; do eerror "$l"; done
+		eoutdent
+		eend 1
+	fi
 }
 
 start() {
-	local log_opts rsl_list res
+	local log_opt log_opt_prefix rsl_list res
 
-	ebegin "Checking $SVCNAME"
-	if ! check; then
-		eindent
-		elines 1
-		eoutdent
-		eend 1
-		return 1
-	else
-		eend 0
-	fi
+	check || return 1
 
 	ebegin "Starting $SVCNAME on $DNSCRYPT_LOCAL_ADDRESS"
 	eindent
@@ -73,7 +65,13 @@ start() {
 	if [[ "$DNSCRYPT_LOGGER" == 'syslog' ]] || checkpath -f -m 660 --owner "$DNSCRYPT_USER:$DNSCRYPT_GROUP" "$DNSCRYPT_LOGGER"; then
 		if checkpath -d -m 660 --owner "$DNSCRYPT_USER:$DNSCRYPT_GROUP" "$rundir"; then
 
-			[[ "$DNSCRYPT_LOGGER" == 'syslog' ]] && log_opts='--syslog' || log_opts="--logfile=$DNSCRYPT_LOGGER"
+			if [[ "$DNSCRYPT_LOGGER" == 'syslog' ]]; then
+				log_opt='--syslog'
+				DNSCRYPT_SYSLOG_PREFIX="${DNSCRYPT_SYSLOG_PREFIX/<name>/${NAME}}"
+				[[ -n "$DNSCRYPT_SYSLOG_PREFIX" ]] && log_opt_prefix="--syslog-prefix=$DNSCRYPT_SYSLOG_PREFIX"
+			else
+				log_opt="--logfile=$DNSCRYPT_LOGGER"
+			fi
 
 			if [[ $DNSCRYPT_MODE == 'name' ]]; then
 				DNSCRYPT_OPTS="$DNSCRYPT_OPTS --resolver-name=$DNSCRYPT_RESOLVER_NAME"
@@ -87,15 +85,6 @@ start() {
 			else
 				einfo "using $DNSCRYPT_PROVIDER_NAME on $DNSCRYPT_PROVIDER_ADDRESS"
 			fi
-			# start-stop-daemon --start \
-			# 				  --wait 300 \
-			# 				  --exec $DAEMON \
-			# 				  -- \
-			# 				  --daemonize \
-			# 				  --user=$DNSCRYPT_USER \
-			# 				  --pidfile=${pidfile} \
-			# 				  --local-address=${DNSCRYPT_LOCAL_ADDRESS} \
-			# 				  $opts > $outfile 2>&1
 			start-stop-daemon --start \
 							  --background \
 							  --wait 300 \
@@ -105,11 +94,8 @@ start() {
 							  --user=$DNSCRYPT_USER \
 							  --pidfile=${pidfile} \
 							  --local-address=${DNSCRYPT_LOCAL_ADDRESS} \
-							  $DNSCRYPT_OPTS "$log_opts" "$rsl_list" >$outfile 2>&1
+							  $DNSCRYPT_OPTS "$log_opt" "$log_opt_prefix" "$rsl_list"
 			res=$?
-			LINES=(); readarray -t LINES <$outfile
-			elines $res
-			rm -f $outfile
 		fi
 	fi
 	eoutdent
