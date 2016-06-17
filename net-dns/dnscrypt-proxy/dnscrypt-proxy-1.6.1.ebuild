@@ -49,9 +49,9 @@ pkg_postinst() {
 	elog "/etc/resolv.conf and replace your current set of resolvers"
 	elog "with:"
 	elog
-	elog "nameserver <DNSCRYPT_LOCALIP>"
+	elog "nameserver <DNSCRYPT_LOCAL_ADDRESS>"
 	elog
-	elog "where <DNSCRYPT_LOCALIP> is what you supplied in"
+	elog "where <DNSCRYPT_LOCAL_ADDRESS> is what you supplied in"
 	elog "/etc/conf.d/dnscrypt-proxy, default is \"127.0.0.1\"."
 	elog
 	elog "Also see https://github.com/jedisct1/dnscrypt-proxy#usage."
