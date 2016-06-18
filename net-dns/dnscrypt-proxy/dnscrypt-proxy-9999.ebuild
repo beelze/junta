@@ -1,4 +1,4 @@
-# Copyright 1999-2015 Gentoo Foundation
+# Copyright 1999-2016 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 # $Id$
 
@@ -13,7 +13,7 @@ SRC_URI=""
 
 LICENSE="ISC"
 SLOT="0"
-KEYWORDS="~amd64 ~x86"
+KEYWORDS=""
 IUSE="+plugins systemd"
 
 CDEPEND="
@@ -48,7 +48,7 @@ src_install() {
 	default
 
 	newinitd "${FILESDIR}"/${PN}.initd-${PV} ${PN}
-	newconfd "${FILESDIR}"/${PN}.confd ${PN}
+	newconfd "${FILESDIR}"/${PN}.confd-${PV} ${PN}
 	#systemd_dounit "${FILESDIR}"/${PN}.service
 }
 

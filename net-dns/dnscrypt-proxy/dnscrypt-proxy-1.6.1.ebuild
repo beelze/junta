@@ -40,7 +40,7 @@ src_install() {
 	default
 
 	newinitd "${FILESDIR}"/${PN}.initd-${PV} ${PN}
-	newconfd "${FILESDIR}"/${PN}.confd ${PN}
+	newconfd "${FILESDIR}"/${PN}.confd-${PV} ${PN}
 	#systemd_dounit "${FILESDIR}"/${PN}.service
 }
 
