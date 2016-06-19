@@ -44,6 +44,9 @@ DNSCRYPT_MODE='name'
 
 # default is ${SVCNAME#dnscrypt-proxy.}"
 DNSCRYPT_RESOLVER_NAME=
+# For standalone version use value from CSV-file list.
+# For example (NOT recommended default):
+# DNSCRYPT_RESOLVER_NAME=cisco # Cisco OpenDNS
 # default is /usr/share/dnscrypt-proxy/dnscrypt-resolvers.csv
 DNSCRYPT_RESOLVERS_FILE=
 

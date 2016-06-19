@@ -53,7 +53,7 @@ src_install() {
 }
 
 pkg_postinst() {
-	elog "After starting the service you will need to update your"
+	elog "After starting the service you may want to update your"
 	elog "/etc/resolv.conf and replace your current set of resolvers"
 	elog "with:"
 	elog
@@ -63,4 +63,10 @@ pkg_postinst() {
 	elog "/etc/conf.d/dnscrypt-proxy, default is \"127.0.0.1\"."
 	elog
 	elog "Also see https://github.com/jedisct1/dnscrypt-proxy#usage."
+	elog
+	elog
+	elog "But because of query process time up to 3-4 seconds on some"
+	elog "nameservers from dnscrypt-proxy database you'll probably"
+	elog "will want to setup local caching DNS server"
+	elog "bind/unbound or something else."
 }
