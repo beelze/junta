@@ -1,26 +1,26 @@
-# this config suitable for both standalone as well as well as 'aliased' (ln -s dnscrypt-proxy dnscrypt-proxy.alias) use,
-# where alias can be set to Name field from dnscrypt-resolvers.csv file (see DNSCRYPT_MODE='name' and it's variables below)
+# this config suitable for both standalone as well as 'aliased' (ln -s dnscrypt-proxy dnscrypt-proxy.alias) use,
+# where alias can "select" (be equal to) Name (1st) field from dnscrypt-resolvers.csv file (see DNSCRYPT_MODE='name' and it's variables below)
 
-# by default dns-crypt service intentionally do not 'provide' dns because of probably (and reasonably) chained use of dnscrypt-proxy
-# with some forwarder/cache, e.g. unbound. In that case, you can use:
+# by default dns-crypt service intentionally not 'provides' dns because of probably (and reasonably) chained use of dnscrypt-proxy
+# with some forwarder/cache, e.g. unbound. In that case, you can use here:
 
 # rc_provide=cryptodns
 
-# ... whereas unbound 'provides' dns and should 'need' cryptodns
+# ... whereas conf.d/unbound 'provides' dns and 'needs' cryptodns
 
 # if you plan to use two or more 'aliased' instances as redundant dns subproviders, consider put
 
 # rc_provide="!cryptodns"
 
-# ...into 'main' conf.d
-# but keep rc_provide=cryptodns for 'aliased' conf.d's. This will remove a non-aliased service from dependency graph, avoided unneeded service start.
-# for proper autostart of aliased services also put rc_need="cryptodns" and rc_want="dnscrypt-proxy.*" into unbound config
+# ...into 'main' conf.d/dnscrypt-proxy, but keep rc_provide=cryptodns for 'aliased' conf.d's.
+# This will remove a non-aliased service from dependency graph, avoided unneeded service start.
+# for proper autostart of aliased services also put rc_need="cryptodns" and rc_want="dnscrypt-proxy.*" into conf.d/unbound
 
 # ip[:port]
 DNSCRYPT_LOCAL_ADDRESS='127.0.0.1'
 
-# default is /var/log/${SVCNAME}.log, one can set it to /path/to/file or special 'syslog' value
-# logfile is not recommended by now because of lack of timestamp
+# if empty, log to /var/log/${SVCNAME}.log, otherwise it can be set to /path/to/file or special 'syslog' value
+# WARNING! Now logging to file is not recommended because of lack of timestamp in log lines
 DNSCRYPT_LOGGER=syslog
 
 # placeholder '<name>' replaces by ${SVCNAME#dnscrypt-proxy.}
@@ -34,7 +34,7 @@ DNSCRYPT_USER=
 # default is dnscrypt (not sure it *really* needed)
 DNSCRYPT_GROUP=
 
-# --loglevel=, --max-active-requests=, --ephemeral-keys etc
+# various dnscrypt-proxy options: --loglevel=, --max-active-requests=, --ephemeral-keys etc
 DNSCRYPT_OPTS=
 
 # mode: 'name' (use resolver from file) or 'ip' (set resolver explicitly)
@@ -42,11 +42,11 @@ DNSCRYPT_MODE='name'
 
 ### 'name' mode variables:
 
-# default is ${SVCNAME#dnscrypt-proxy.}"
+# empty value means ${SVCNAME#dnscrypt-proxy.} (e.g. DNSCRYPT_RESOLVER_NAME is equal to 'alias')
 DNSCRYPT_RESOLVER_NAME=
-# For standalone version use value from CSV-file list.
-# For example (NOT recommended default):
-# DNSCRYPT_RESOLVER_NAME=cisco # Cisco OpenDNS
+# Can be set explicitly (Cisco OpenDNS):
+# DNSCRYPT_RESOLVER_NAME=cisco
+
 # default is /usr/share/dnscrypt-proxy/dnscrypt-resolvers.csv
 DNSCRYPT_RESOLVERS_FILE=
 
