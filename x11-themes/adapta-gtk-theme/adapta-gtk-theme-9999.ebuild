@@ -25,14 +25,15 @@ LICENSE="GPL-2"
 SLOT="0"
 IUSE=""
 
-DEPEND="
+RDEPEND="
 	x11-libs/gtk+:2
 	>=dev-ruby/sass-3.4.21:3.4
 	>=dev-ruby/bundler-1.11
 	media-gfx/inkscape
 	dev-libs/libxml2:2
 "
-RDEPEND="${DEPEND}"
+DEPEND="${RDEPEND}
+	sys-process/parallel"
 
 src_prepare(){
 	eautoreconf
