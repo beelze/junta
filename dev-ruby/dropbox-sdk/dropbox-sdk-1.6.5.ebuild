@@ -10,12 +10,12 @@ RUBY_FAKEGEM_RECIPE_TEST="rspec"
 
 inherit ruby-fakegem
 
-DESCRIPTION="An ftp-like command-line Dropbox interface in Ruby."
-HOMEPAGE="http://jangler.info/code/droxi"
-SRC_URI="http://github.com/jangler/${PN}/archive/v${PV}.tar.gz"
+DESCRIPTION="A library that provides a plain function-call interface to the Dropbox API web endpoints."
+HOMEPAGE="https://rubygems.org/gems/dropbox-sdk/"
+SRC_URI="https://rubygems.org/downloads/${P}.gem"
 
-LICENSE="as is"
+LICENSE="MIT"
 SLOT="0"
 KEYWORDS="~amd64 ~x86"
 
-ruby_add_rdepend ">=dev-ruby/dropbox-sdk-1.6.5"
+ruby_add_rdepend "dev-ruby/json"
