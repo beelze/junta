@@ -33,7 +33,8 @@ RDEPEND="
 	dev-libs/libxml2:2
 "
 DEPEND="${RDEPEND}
-	sys-process/parallel"
+	sys-process/parallel
+    dev-lang/sassc"
 
 src_prepare(){
 	eautoreconf
