@@ -39,8 +39,8 @@ src_configure() {
 src_install() {
 	default
 
-	newinitd "${FILESDIR}"/${PN}.initd-9999 ${PN}
-	newconfd "${FILESDIR}"/${PN}.confd-9999 ${PN}
+	newinitd "${FILESDIR}"/${PN}.initd-1.7.0 ${PN}
+	newconfd "${FILESDIR}"/${PN}.confd-1.7.0 ${PN}
 	#systemd_dounit "${FILESDIR}"/${PN}.service
 }
 

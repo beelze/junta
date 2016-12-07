@@ -1,0 +1,40 @@
+# ip[:port]
+DNSCRYPT_LOCAL_ADDRESS='127.1.1.1'
+
+# default is /var/log/${SVCNAME}.log, one can set it to /path/to/file or special 'syslog' value
+DNSCRYPT_LOGGER=
+
+# placeholder '<name>' replaces by ${SVCNAME#dnscrypt-proxy.}
+# only valid when DNSCRYPT_LOGGER=syslog
+DNSCRYPT_SYSLOG_PREFIX='[<name>]'
+#DNSCRYPT_SYSLOG_PREFIX=
+
+# default is dnscrypt
+DNSCRYPT_USER=
+
+# default is dnscrypt (not sure it *really* needed)
+DNSCRYPT_GROUP=
+
+# mode: 'name' or 'ip'
+DNSCRYPT_MODE='name'
+
+# --loglevel=, --max-active-requests=, --ephemeral-keys etc
+DNSCRYPT_OPTS=
+
+### 'name' mode variables:
+
+# default is ${SVCNAME#dnscrypt-proxy.}"
+DNSCRYPT_RESOLVER_NAME=
+# default is /usr/share/dnscrypt-proxy/dnscrypt-resolvers.csv
+DNSCRYPT_RESOLVERS_FILE=
+
+### 'ip' mode variables:
+
+# ip:port, mandatory
+DNSCRYPT_PROVIDER_ADDRESS=
+# mandatory
+DNSCRYPT_PROVIDER_NAME=
+# mandatory
+DNSCRYPT_PROVIDER_KEY=
+
+#rc_provide="!cryptodns"

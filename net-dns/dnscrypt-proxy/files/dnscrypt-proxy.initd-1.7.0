@@ -1,0 +1,132 @@
+#!/sbin/openrc-run
+# Copyright 1999-2014 Gentoo Foundation
+# Distributed under the terms of the GNU General Public License v2
+# $Id$
+
+depend() {
+    need net
+    before dns
+    use logger
+#   provide cryptodns
+}
+
+lowercase() {
+    echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+warray() {
+    _warray_awk_begin='BEGIN{RS="#EOT#"}'
+    case $1 in
+        init)
+            _WARRAY='' ;;
+        add)
+            _WARRAY="${_WARRAY}${2}#EOT#" ;;
+        count)
+            if [ -z "$_WARRAY" ]; then
+                echo 0
+                return 1
+            else
+                echo "$_WARRAY" | awk "${_warray_awk_begin} END{print NR-1}"
+            fi
+            ;;
+        [0-9]*)
+            echo -n "$_WARRAY" | awk -v "r=${1}" "${_warray_awk_begin} {if(NR==r) {print \$0; exit}}"
+            ;;
+    esac
+}
+
+DAEMON=/usr/sbin/dnscrypt-proxy
+
+NAME="${SVCNAME#dnscrypt-proxy}"
+NAME="${NAME#.}"
+
+DNSCRYPT_MODE=$(lowercase "$DNSCRYPT_MODE")
+DNSCRYPT_LOGGER="${DNSCRYPT_LOGGER:-/var/log/${SVCNAME}.log}"
+DNSCRYPT_USER="${DNSCRYPT_USER:-dnscrypt}"
+DNSCRYPT_GROUP="${DNSCRYPT_GROUP:-dnscrypt}"
+DNSCRYPT_RESOLVER_NAME="${DNSCRYPT_RESOLVER_NAME:-${NAME}}"
+DNSCRYPT_RESOLVERS_FILE="${DNSCRYPT_RESOLVERS_FILE:-/usr/share/dnscrypt-proxy/dnscrypt-resolvers.csv}"
+
+rundir="/var/run/${SVCNAME}"
+pidfile="$rundir/dnscrypt-proxy.pid"
+
+check() {
+    warray init
+
+    ebegin "Checking $SVCNAME"
+
+    if [ "$DNSCRYPT_MODE" = 'name' ]; then
+        [ -n "$DNSCRYPT_RESOLVER_NAME" ] || warray add "DNSCRYPT_RESOLVER_NAME not set"
+        [ -s "$DNSCRYPT_RESOLVERS_FILE" ] || warray add "DNSCRYPT_RESOLVERS_FILE not set or not a non-empty file: '$DNSCRYPT_RESOLVERS_FILE'"
+    elif [ "$DNSCRYPT_MODE" = 'ip' ]; then
+        [ -n "$DNSCRYPT_PROVIDER_ADDRESS" ] || warray add "DNSCRYPT_PROVIDER_ADDRESS not set"
+        [ -n "$DNSCRYPT_PROVIDER_NAME" ] || warray add "DNSCRYPT_PROVIDER_NAME not set"
+        [ -n "$DNSCRYPT_PROVIDER_KEY" ] || warray add "DNSCRYPT_PROVIDER_KEY not set"
+    else
+        warray add "invalid DNSCRYPT_MODE: '$DNSCRYPT_MODE', expected 'name' or 'ip'"
+    fi
+    [ -n "$DNSCRYPT_LOCAL_ADDRESS" ] || warray add "DNSCRYPT_LOCAL_ADDRESS not set, expected ip[:port]"
+
+    if ! warray count > /dev/null; then
+        eend 0
+    else
+        eindent
+        for i in $(seq $(warray count)); do eerror "$(warray $i)"; done
+        eoutdent
+        eend 1
+    fi
+}
+
+start() {
+    check || return 1
+
+    ebegin "Starting $SVCNAME on $DNSCRYPT_LOCAL_ADDRESS"
+    eindent
+
+    res=1
+    if [ "$DNSCRYPT_LOGGER" = 'syslog' ] || checkpath -f -m 660 --owner "$DNSCRYPT_USER:$DNSCRYPT_GROUP" "$DNSCRYPT_LOGGER"; then
+        if checkpath -d -m 660 --owner "$DNSCRYPT_USER:$DNSCRYPT_GROUP" "$rundir"; then
+
+            if [ "$DNSCRYPT_LOGGER" = 'syslog' ]; then
+                log_opt='--syslog'
+                #DNSCRYPT_SYSLOG_PREFIX="${DNSCRYPT_SYSLOG_PREFIX/<name>/${NAME}}"
+                DNSCRYPT_SYSLOG_PREFIX=$(echo "$DNSCRYPT_SYSLOG_PREFIX" | sed "s#<name>#${NAME}#")
+                [ -n "$DNSCRYPT_SYSLOG_PREFIX" ] && log_opt_prefix="--syslog-prefix=$DNSCRYPT_SYSLOG_PREFIX"
+            else
+                log_opt="--logfile=$DNSCRYPT_LOGGER"
+            fi
+
+            if [ "$DNSCRYPT_MODE" = 'name' ]; then
+                DNSCRYPT_OPTS="$DNSCRYPT_OPTS --resolver-name=$DNSCRYPT_RESOLVER_NAME"
+                rsl_list="--resolvers-list=$DNSCRYPT_RESOLVERS_FILE"
+            else
+                DNSCRYPT_OPTS="$DNSCRYPT_OPTS --resolver-address=$DNSCRYPT_PROVIDER_ADDRESS --provider-name=$DNSCRYPT_PROVIDER_NAME --provider-key=$DNSCRYPT_PROVIDER_KEY"
+            fi
+
+            if [ "$DNSCRYPT_MODE" = 'name' ]; then
+                einfo "using $DNSCRYPT_RESOLVER_NAME from '$DNSCRYPT_RESOLVERS_FILE'"
+            else
+                einfo "using $DNSCRYPT_PROVIDER_NAME on $DNSCRYPT_PROVIDER_ADDRESS"
+            fi
+            start-stop-daemon --start \
+                              --background \
+                              --wait 500 \
+                              --make-pidfile --pidfile "$pidfile" \
+                              --exec $DAEMON \
+                              -- \
+                              --user=$DNSCRYPT_USER \
+                              --pidfile="$pidfile" \
+                              --local-address="$DNSCRYPT_LOCAL_ADDRESS" \
+                              $DNSCRYPT_OPTS "$log_opt" "$log_opt_prefix" "$rsl_list"
+            res=$?
+        fi
+    fi
+    eoutdent
+    eend $res
+}
+
+stop() {
+    ebegin "Stopping $SVCNAME on $DNSCRYPT_LOCAL_ADDRESS"
+    start-stop-daemon --stop --pidfile="$pidfile" --exec $DAEMON
+    eend $?
+}
