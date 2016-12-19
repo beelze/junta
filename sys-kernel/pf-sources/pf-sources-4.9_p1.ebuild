@@ -5,6 +5,8 @@
 EAPI="5"
 inherit readme.gentoo-r1 toolchain-funcs versionator
 
+SLOT="4.9_p1"
+
 COMPRESSTYPE=".xz"
 K_USEPV="yes"
 UNIPATCH_STRICTORDER="yes"
