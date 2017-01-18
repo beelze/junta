@@ -1,4 +1,4 @@
-# Copyright 1999-2015 Gentoo Foundation
+# Copyright 1999-2016 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 # $Id$
 
@@ -39,8 +39,15 @@ src_configure() {
 src_install() {
 	default
 
-	newinitd "${FILESDIR}"/${PN}.initd-${PV} ${PN}
-	newconfd "${FILESDIR}"/${PN}.confd-${PV} ${PN}
+	exeinto /usr/libexec
+	doexe "${FILESDIR}"/dnscrypt-proxies.py
+	insinto /etc
+	doins "${FILESDIR}"/dnscrypt-proxies.conf
+	newinitd "${FILESDIR}"/${PN}.initd ${PN}
+	keepdir "/var/log/${PN}"
+	fowners dnscrypt:dnscrypt "/var/log/${PN}"
+	#newinitd "${FILESDIR}"/${PN}.initd-1.7.0 ${PN}
+	#newconfd "${FILESDIR}"/${PN}.confd-1.7.0 ${PN}
 	#systemd_dounit "${FILESDIR}"/${PN}.service
 }
 
@@ -52,7 +59,11 @@ pkg_postinst() {
 	elog "nameserver <DNSCRYPT_LOCAL_ADDRESS>"
 	elog
 	elog "where <DNSCRYPT_LOCAL_ADDRESS> is what you supplied in"
-	elog "/etc/conf.d/dnscrypt-proxy, default is \"127.0.0.1\"."
+	elog "/etc/dnscrypt-proxies.conf, default is \"127.0.0.100\"."
 	elog
-	elog "Also see https://github.com/jedisct1/dnscrypt-proxy#usage."
+	elog "For use with local DNS chache server add addresses above"
+	elog "in it's config and dependency in service's config."
+	elog "For example for unbound place line in /etc/conf.d/unbound:"
+	elog
+	elog "rc_need=\"cryptodns\""
 }
