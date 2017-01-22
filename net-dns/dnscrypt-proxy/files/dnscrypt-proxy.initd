@@ -2,14 +2,15 @@
 # Copyright 1999-2017 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 # $Id$
+
 command=/usr/libexec/dnscrypt-proxies.py
 required_dirs=/var/log/dnscrypt-proxy
 pidfile=/var/run/dnscrypt-proxies.pid
 start_stop_daemon_args="--interpreted --pidfile ${pidfile} --make-pidfile"
 command_background=yes
-name="Meta-daemon for dnscrypt-proxy"
 
-description="Daemon, which starts dnscrypt-proxy instances"
+name="dnscrypt-proxies"
+description="invokes and keeps dnscrypt-proxy instances in one place"
 
 depend() {
 	need net
