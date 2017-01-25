@@ -18,6 +18,9 @@ from pathlib import Path
 from collections import OrderedDict
 from string import Template
 from random import sample
+from time import sleep
+from socket import AF_INET, AF_INET6, SOCK_STREAM, SOCK_DGRAM
+from importlib.util import find_spec
 
 MINVER = (3, 3)
 DAEMON = 'dnscrypt-proxy'
@@ -25,21 +28,23 @@ MYNAME = 'dnscrypt-proxies'
 DEFAULT_LOGFILE = '/var/log/dnscrypt-proxy/'+MYNAME+'.log'
 DEFAULT_CONFIG_INSTANCE = '/etc/dnscrypt-proxy/${name}.conf'
 DEFAULT_LOGFILE_INSTANCE = '/var/log/dnscrypt-proxy/${name}.log'
-LOGFILE_INSTANCE_MODE = 0o640
-CONFIG_LOCATIONS = ['/etc/'+MYNAME+'.conf', str(Path(__file__).parent / (MYNAME+'.conf'))]
+LOGFILE_INSTANCE_PERMISSIONS = 0o640
+CONFIG_LOCATIONS = [str(Path(__file__).parent / (MYNAME+'.conf')),
+                    '/etc/'+MYNAME+'.conf',
+                    '/etc/dnscrypt-proxy/'+MYNAME+'.conf']
 CONFIG_BOOLEANS = {'yes': True, 'true': True, 'on': True, 'no': False, 'false': False, 'off': False}
 CONFIG_MODES = ('config', 'list', 'manual', 'random')
 INSTANCE_OPTS = ('mode', 'nrandom', 'blocklist', 'config', 'logfile', 'loglevel', 'localaddress',
                  'resolverslist', 'providerkey', 'resolveraddress',
                  'ephemeralkeys', 'tcponly', 'maxactiverequests', 'ednspayloadsize', 'user')
 
-RE_IP4PORT = re.compile(r'([0-9.]+):([\d]+)')
-RE_IP6PORT = re.compile(r'\[([0-9A-F:]+)\]:([\d]+)', re.I)
-PROCESS_POLL_TIMEOUT = 0.5
+PROCESS_POLL_TIMEOUT = 1
+SERVICE_THREADS_DELAY = 30
+INSTANCE_CHECK_CONNECTIONS_DELAY = 3
 
+ERR_GETSOCK = 'failed to get listening socket: '
 ERR_NOTBOOLEAN = 'not a boolean'
 ERR_UNEXPECTEDOPTS = "unexpected options in [{}]: {}"
-ERR_CMDLINE = "Invalid command line: {}\navailable options: -v (verbose), -f file (config file)"
 MSG_USAGE = """
 options: -h (help)
          -v (verbose)
@@ -51,15 +56,13 @@ if sys.hexversion < (MINVER[0] * 0x100 + MINVER[1]) * 0x10000:
     print("We need at least python {0[0]}.{0[1]}".format(MINVER), file=sys.stderr)
     sys.exit(1)
 
-
-def _format_address(addr_tuple):
-    ip, port = addr_tuple
-    str_ip = str(ip)
-    if isinstance(ip, ipaddress.IPv6Address):
-        str_ip = '[' + str_ip + ']'
-    if port:
-        str_ip += ':' + str(port)
-    return str_ip
+psutil = None
+if find_spec('psutil'):
+    import psutil
+else:
+    print("Failed to find psutil module, advanced functionality is disabled\n"
+          "Consider installing psutil in your package manager or just run 'pip install psutil,'\n"
+          "...but ensure you're installing psutil for python3!\n", file=sys.stderr)
 
 
 def _get_pwname(name_or_uid):
@@ -113,16 +116,10 @@ def _load_opt(option, value):
             return False, str(e)+' (expected comma-delimited list of field:regexp)'
 
     elif option in ('localaddress', 'resolveraddress'):
-        m = RE_IP4PORT.fullmatch(value) or RE_IP6PORT.fullmatch(value)
         try:
-            if m:
-                g = m.groups()
-                return True, (ipaddress.ip_address(g[0]), int(g[1]))
-            else:
-                v = ipaddress.ip_address(value)
-                return True, (v, None)
-        except ValueError:
-            return False, 'not a valid ip[:port]'
+            return True, IPPort(value)
+        except ValueError as e:
+            return False, str(e)
 
     elif option == 'resolverslist':
         if _isfile(value):
@@ -190,7 +187,95 @@ def _check_opt(section, option, value):
             raise MyConfigNotAllowedError('allowed only in [common]', section, option)
         if option == 'mode' and value == 'random':
             raise MyConfigNotAllowedError('allowed only in [common]', section, option, value)
+    if section == 'common':
+        if option in ('providerkey', 'resolveraddress'):
+            raise MyConfigNotAllowedError('allowed only in instance sections', section, option, value)
     return True
+
+
+class IPPort(str):
+    def __new__(cls, ipport, optional_port=True):
+        ip, port = None, None
+        try:
+            if isinstance(ipport, (tuple, list)):
+                if 1 <= len(ipport) <= 2:
+                    ip = ipaddress.ip_address(ipport[0])
+                    if len(ipport) == 2:
+                        if ipport[1] is not None:
+                            port = cls._check_port(ipport[1])
+                    if not optional_port and port is None:
+                        raise ValueError('port is mandatory')
+                else:
+                    raise ValueError('expected tuple or list of: ip, port')
+            else:
+                # [ipv6]:port
+                _ip, sep, _port = ipport.partition(']:')
+                if sep:
+                    if _ip and _port and _ip[0] == '[':
+                        ip, port = ipaddress.IPv6Address(_ip[1:]), cls._check_port(_port)
+                    else:
+                        raise ValueError()
+                else:
+                    # ipv4:port
+                    _ip, sep, _port = ipport.partition(':')
+                    if sep:
+                        if _ip and _port:
+                            ip, port = ipaddress.IPv4Address(_ip), cls._check_port(_port)
+                        else:
+                            raise ValueError()
+                    else:
+                        # [ipv6] or ipv4
+                        if optional_port:
+                            ip = ipaddress.ip_address(_ip)
+                        else:
+                            raise ValueError('port is mandatory')
+
+        except ValueError as ipport_err:
+            msg = str(ipport_err)
+            if not msg:
+                msg = 'not a valid ipv4[:port] or \[ipv6\][:port]'
+            raise ValueError(msg)
+
+        o = super().__new__(cls, cls._to_str(ip, port))
+        o._initialized = False
+        o.ip, o.port = ip, port
+        o._initialized = True
+        return o
+
+    def __setattr__(self, key, value):
+        if key in ('ip', 'port') and self._initialized:
+            raise AttributeError('{}().{} is not mutable'.format(self.__class__.__name__, key))
+        else:
+            super().__setattr__(key, value)
+
+    @staticmethod
+    def _check_port(port):
+        # noinspection PyBroadException
+        try:
+            port = int(port)
+            if 0 < port < 65535:
+                return port
+        except:
+            pass
+        raise ValueError('invalid port value: ' + str(port))
+
+    @staticmethod
+    def _to_str(ip, port):
+        if ip:
+            str_ip = str(ip)
+            if isinstance(ip, ipaddress.IPv6Address):
+                str_ip = '[' + str_ip + ']'
+            if port:
+                str_ip += ':' + str(port)
+            return str_ip
+        else:
+            return 'None:None'
+
+    def next_address(self):
+        return IPPort((self.ip + 1, self.port))
+
+    def __str__(self):
+        return self._to_str(self.ip, self.port)
 
 
 class MyError(Exception):
@@ -256,6 +341,7 @@ class InstanceBase(threading.Thread):
     def __init__(self, config, section):
         self.instance_name = section
 
+        self.real_localaddress = None
         self.process = None
         self.binary = None
         self.logger = None
@@ -278,12 +364,12 @@ class InstanceBase(threading.Thread):
 
         self._prepare()
 
-        super().__init__(name=MYNAME+':'+self.instance_name, daemon=False)
+        super().__init__(name=self.instance_name, daemon=False)
 
     def _allocate_ip(self):
         n = self.__class__.nextip
         if n:
-            self.__class__.nextip = (self.__class__.nextip[0] + 1, self.__class__.nextip[1])
+            self.__class__.nextip = self.__class__.nextip.next_address()
             return n
         else:
             return None
@@ -321,7 +407,7 @@ class InstanceBase(threading.Thread):
             raise configparser.Error("[{}].localaddress is mandatory for non-config modes".format(self.instance_name))
 
         if not self._check_unique('localaddress', self.localaddress):
-            raise MyConfigUniqueError(self.instance_name, 'localaddress', _format_address(self.localaddress))
+            raise MyConfigUniqueError(self.instance_name, 'localaddress', self.localaddress)
 
     def _correct_logfile_permissions(self):
         if self.user is not None and self.user != 'root' and self._instance_logfile is not None:
@@ -329,7 +415,7 @@ class InstanceBase(threading.Thread):
                 p = Path(self._instance_logfile)
                 if not p.exists():
                     self.logger.info("Creating " + str(p))
-                    p.touch(mode=LOGFILE_INSTANCE_MODE)
+                    p.touch(mode=LOGFILE_INSTANCE_PERMISSIONS)
 
                 if p.owner() != self.user:
                     self.logger.info("Correcting user for "+str(p))
@@ -338,20 +424,20 @@ class InstanceBase(threading.Thread):
                 if not stat.S_ISREG(mode):
                     raise PermissionError("Not a regular file")
                 mode = stat.S_IMODE(mode)
-                if mode & LOGFILE_INSTANCE_MODE != LOGFILE_INSTANCE_MODE:
+                if mode & LOGFILE_INSTANCE_PERMISSIONS != LOGFILE_INSTANCE_PERMISSIONS:
                     self.logger.info("Correcting mode for "+str(p))
-                    p.chmod(LOGFILE_INSTANCE_MODE)
+                    p.chmod(LOGFILE_INSTANCE_PERMISSIONS)
             except (OSError, PermissionError) as e:
                 self.logger.error("Failed to create or access/set logfile permissions: {}".format(e))
                 return False
         return True
 
     def info(self):
-        txt = "{} mode".format(self.mode)
+        txt = self.mode + ' mode'
         if self.mode != 'config':
-            txt += ", local {}".format(_format_address(self.localaddress))
+            txt += ', local ' + self.localaddress
         if self.mode == 'manual':
-            txt += ", remote {}".format(_format_address(self.resolveraddress))
+            txt += ', resolver ' + self.resolveraddress
         return txt
 
     def is_process_alive(self):
@@ -362,6 +448,33 @@ class InstanceBase(threading.Thread):
         self.binary, self.logger = binary, logger
         super().start()
 
+    def _get_real_localaddress(self):
+        sleep(INSTANCE_CHECK_CONNECTIONS_DELAY)
+        self.real_localaddress, conns = tuple(), None
+        if self.is_process_alive():
+            try:
+                conns = psutil.Process(self.process.pid).connections()
+            except psutil.NoSuchProcess:
+                self.logger.warning(ERR_GETSOCK +
+                                    'no process with pid {} exists'.format(self.process.pid))
+            except Exception as e:
+                self.logger.warning(ERR_GETSOCK +
+                                    'unexpected {}'.format(str(e)))
+            if conns:
+                self.real_localaddress = tuple(set([IPPort(conn.laddr) for conn in conns if
+                                                    conn.family in (AF_INET, AF_INET6) and
+                                                    (conn.type == SOCK_STREAM and conn.status == 'LISTEN') or
+                                                    (conn.type == SOCK_DGRAM and conn.status == 'NONE')
+                                                    ]))
+                nconns = len(self.real_localaddress)
+                if nconns == 1:
+                    self.logger.info('detected listening socket: {}'.format(self.real_localaddress[0]))
+                elif nconns > 1:
+                    self.logger.warning('more than one listening socket detected: {}'.format(
+                        ', '.join(self.real_localaddress)))
+                else:
+                    self.logger.warning('unexpected: no listening sockets detected')
+
     def run(self):
         args = [self.binary] + self.cmdline_args()
         if self._correct_logfile_permissions():
@@ -370,6 +483,8 @@ class InstanceBase(threading.Thread):
                 self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                                 bufsize=1, universal_newlines=True)
                 self.logger.info("Started <{}>".format(self.process.pid))
+                if psutil:
+                    threading.Thread(name=self.name, target=self._get_real_localaddress).start()
                 while self.process.returncode is None:
                     try:
                         self.process.wait(PROCESS_POLL_TIMEOUT)
@@ -390,28 +505,28 @@ class InstanceBase(threading.Thread):
         if self.mode == 'list':
             args = ['-L', self.resolverslist, '-R', self.instance_name]
         else:
-            args = ['-N', self.instance_name, '-k', self.providerkey, '-r', _format_address(self.resolveraddress)]
+            args = ['-N', self.instance_name, '-k', self.providerkey, '-r', self.resolveraddress]
 
-        args += ['-a', _format_address(self.localaddress)]
+        args += ['-a', self.localaddress]
         logfile = self.logfile or ''
         if logfile.lower() != 'none':
             if logfile.lower() == 'syslog':
                 args += ['-S', '-Z', '[{}]'.format(self.instance_name)]
             else:
                 if logfile == '':
-                    logfile = _template_subst(DEFAULT_LOGFILE_INSTANCE, name=self.instance_name)
+                    logfile = DEFAULT_LOGFILE_INSTANCE
+                logfile = _template_subst(logfile, name=self.instance_name)
                 args += ['-l', logfile]
                 self._instance_logfile = logfile
             if self.loglevel is not None:
-                args += ['-m', self.loglevel]
+                args += ['-m', str(self.loglevel)]
         if self.user is not None:
             args += ['-u', self.user]
         return args
 
 
-class MyFilter(logging.Filter):
-    def __init__(self, exclusive_maximum, name=""):
-        super().__init__(name)
+class MyLevelFilter:
+    def __init__(self, exclusive_maximum):
         self.max_level = exclusive_maximum
 
     def filter(self, record):
@@ -427,18 +542,20 @@ class MyLogger(logging.Logger):
 
 class App:
     def __init__(self, argv):
-        threading.main_thread().name = MYNAME
+        threading.main_thread().name = ''
         self._argv = argv
         self._break = False
         self._ss_lock = threading.Lock()
 
-        self._file_formatter = logging.Formatter(fmt='${asctime} [${threadName}] ${levelname}:${lineno} ${message}',
-                                                 datefmt='%Y-%m-%d %H:%M:%S', style='$')
-        self._syslog_formatter = logging.Formatter(fmt='${threadName} ${levelname}:${lineno} ${message}', style='$')
+        self._file_formatter = logging.Formatter(
+            fmt='${asctime} [' + MYNAME + '${threadName}] ${levelname}:${lineno} ${message}',
+            datefmt='%Y-%m-%d %H:%M:%S', style='$')
+        self._syslog_formatter = logging.Formatter(
+            fmt=MYNAME + '${threadName} ${levelname}:${lineno} ${message}', style='$')
         self.logger = logging.getLogger('main')
         log_hnd_out = logging.StreamHandler(sys.stdout)
         log_hnd_out.setLevel(logging.DEBUG)
-        log_hnd_out.addFilter(MyFilter(logging.WARNING))
+        log_hnd_out.addFilter(MyLevelFilter(logging.WARNING))
         log_hnd_out.setFormatter(self._file_formatter)
         self.logger.addHandler(log_hnd_out)
 
@@ -446,6 +563,10 @@ class App:
         log_hnd_err.setLevel(logging.WARNING)
         log_hnd_err.setFormatter(self._file_formatter)
         self.logger.addHandler(log_hnd_err)
+
+        self._is_syslog = False
+        self._old_record_factory = logging.getLogRecordFactory()
+        logging.setLogRecordFactory(self._record_factory)
 
         self._daemon = None
         self._statinterval = None
@@ -515,10 +636,14 @@ class App:
                 self.logger.debug('Switching logging to '+tgt)
                 oldhandlers = list(self.logger.handlers)
                 self.logger.addHandler(hnd)
+
+                if tgt == 'syslog':
+                    self._is_syslog = True
+
                 for h in oldhandlers:
                     self.logger.removeHandler(h)
 
-            except FileNotFoundError as e:
+            except (FileNotFoundError, PermissionError) as e:
                 # noinspection PyUnboundLocalVariable
                 self.logger.warning("Failed to access/create logfile {}: {}".format(tgt, str(e)))
 
@@ -536,6 +661,18 @@ class App:
 
             if od:
                 raise MyConfigUnexpectedOpts(s, od)
+
+    def _record_factory(self, *args, **kwargs):
+        record = self._old_record_factory(*args, **kwargs)
+        thn = record.threadName
+        if thn != '':
+            if self._is_syslog:
+                thn = ' [' + thn + ']'
+            else:
+                thn = ':' + thn
+
+            record.threadName = thn
+        return record
 
     def _parse_cmdline(self, _argv):
         argv = list(_argv)
@@ -711,7 +848,7 @@ if __name__ == '__main__':
             elif signum == signal.SIGALRM:
                 app.logstat()
         else:
-            print('Signal caught too early')
+            print('Signal caught too early', file=sys.stderr)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -724,10 +861,14 @@ if __name__ == '__main__':
         class Instance(InstanceBase, metaclass=MetaInstance, config=app.config, section='common'):
             pass
 
-        app.logger.debug('Default instance configured')
+        app.logger.debug('Default instance parameters: ' +
+                         ', '.join(['{}={}'.format(n, v) for n, v in
+                                    [(o, getattr(Instance, o)) for o in
+                                    set(INSTANCE_OPTS) - {'blocklist', 'nrandom'}]
+                                    if v is not None]))
         # noinspection PyTypeChecker
         app.init_instances(Instance)
-        app.rearm_timer(30)
+        app.rearm_timer(SERVICE_THREADS_DELAY)
         app.run_instances()
         app.logger.info('Clean exit')
         sys.exit(0)
@@ -738,4 +879,3 @@ if __name__ == '__main__':
         else:
             print(myerr.msg)
         sys.exit(myerr.exitcode)
-
