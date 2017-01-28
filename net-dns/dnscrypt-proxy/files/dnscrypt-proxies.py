@@ -46,9 +46,9 @@ ERR_GETSOCK = 'failed to get listening socket: '
 ERR_NOTBOOLEAN = 'not a boolean'
 ERR_UNEXPECTEDOPTS = "unexpected options in [{}]: {}"
 MSG_USAGE = """
-options: -h (help)
-         -v (verbose)
-         -f config_file"""
+options: --help    | -h (help)
+         --verbose | -v (verbose)
+         --config  | -f <config_file>"""
 ERR_CONFFILE = 'Failed to find config file'
 ERR_NOTFILE = 'file not exists/not a file'
 
@@ -537,7 +537,7 @@ class MyLevelFilter:
 class MyLogger(logging.Logger):
     def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False):
         for line in str(msg).split('\n'):
-            super()._log(level, line, args, exc_info=None, extra=None, stack_info=False)
+            super()._log(level, line, args, exc_info, extra, stack_info)
 
 
 class App:
@@ -628,20 +628,23 @@ class App:
                     tgt = 'syslog'
                     hnd = logging.handlers.SysLogHandler('/dev/log', logging.handlers.SysLogHandler.LOG_DAEMON)
                     hnd.setFormatter(self._syslog_formatter)
+                elif log.lower() == 'console':
+                    tgt = 'console'
                 else:
                     tgt = log
                     hnd = logging.handlers.WatchedFileHandler(log)
                     hnd.setFormatter(self._file_formatter)
 
-                self.logger.debug('Switching logging to '+tgt)
-                oldhandlers = list(self.logger.handlers)
-                self.logger.addHandler(hnd)
+                if tgt != 'console':
+                    self.logger.debug('Switching logging to '+tgt)
+                    oldhandlers = list(self.logger.handlers)
+                    self.logger.addHandler(hnd)
 
-                if tgt == 'syslog':
-                    self._is_syslog = True
+                    if tgt == 'syslog':
+                        self._is_syslog = True
 
-                for h in oldhandlers:
-                    self.logger.removeHandler(h)
+                    for h in oldhandlers:
+                        self.logger.removeHandler(h)
 
             except (FileNotFoundError, PermissionError) as e:
                 # noinspection PyUnboundLocalVariable
@@ -666,11 +669,7 @@ class App:
         record = self._old_record_factory(*args, **kwargs)
         thn = record.threadName
         if thn != '':
-            if self._is_syslog:
-                thn = ' [' + thn + ']'
-            else:
-                thn = ':' + thn
-
+            thn = (' [' + thn + ']' if self._is_syslog else ':' + thn)
             record.threadName = thn
         return record
 
@@ -678,32 +677,36 @@ class App:
         argv = list(_argv)
 
         # noinspection PyPep8,PyShadowingNames
-        def _eat_option(option):
+        def _eat_option(option, loption=None):
             found, first, last, left, idx = False, None, None, None, None
             try:
-                idx = argv.index(option)
+                idx = argv.index('-' + option)
             except ValueError:
-                pass
+                try:
+                    if loption is not None:
+                        idx = argv.index('--' + loption)
+                except ValueError:
+                    pass
             if idx is not None:
                 found, first, last, left = True, idx==0, idx==len(argv)-1, len(argv)-1
                 del argv[idx]
             return found, first, last, left
 
-        found, first, last, left = _eat_option('-h')
+        found, first, last, left = _eat_option('h', 'help')
         if found:
             if not left:
                 raise MyUsageException()
             else:
                 raise MyCmdlineError()
 
-        found, first, last, left = _eat_option('-v')
+        found, first, last, left = _eat_option('v', 'verbose')
         if found:
             if first or last:
                 self.logger.setLevel(logging.DEBUG)
             else:
                 raise MyCmdlineError()
 
-        found, first, last, left = _eat_option('-f')
+        found, first, last, left = _eat_option('f', 'config')
         if found:
             if first and left == 1:
                 self._config_file = argv[0]
@@ -739,7 +742,7 @@ class App:
             return False
 
         resolvers, filtered = set(), 0
-        self.logger.debug('Trying to parse (csv) resolvers list '+file)
+        self.logger.debug('Trying to parse (csv) resolvers list from '+file)
         try:
             with open(file) as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -749,7 +752,7 @@ class App:
                     else:
                         filtered += 1
         except Exception as e:
-            raise configparser.Error('Error when parsing resolverslist: '+str(e))
+            raise configparser.Error('Error when parsing resolvers list: '+str(e))
 
         lr = len(resolvers)
         self.logger.debug("{} suitable resolvers found, {} filtered out".format(lr, filtered))
@@ -771,9 +774,8 @@ class App:
 
             if not klass.resolverslist or not klass.localaddress:
                 raise MyError('[common].ResolversList/LocalAddress are mandatory in random mode')
-            config = {'mode': 'list'}
             for resolver in self._random_resolvers(klass.nrandom, klass.resolverslist, klass.blocklist):
-                self.instances[resolver] = klass(config, resolver)
+                self.instances[resolver] = klass({'mode': 'list'}, resolver)
 
         else:
             if 'common' not in self.config:
