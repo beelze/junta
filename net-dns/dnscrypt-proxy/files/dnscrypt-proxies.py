@@ -62,9 +62,10 @@ psutil = None
 if find_spec('psutil'):
     import psutil
 else:
-    print("Failed to find psutil module, advanced functionality is disabled\n"
-          "Consider installing psutil in your package manager or just run 'pip install psutil,'\n"
-          "...but ensure you're installing psutil for python3!\n", file=sys.stderr)
+    pass
+    # print("Failed to find psutil module, advanced functionality is disabled\n"
+    #       "Consider installing psutil in your package manager or just run 'pip install psutil,'\n"
+    #       "...but ensure you're installing psutil for python3!\n", file=sys.stderr)
 
 
 def _get_pwname(name_or_uid):
