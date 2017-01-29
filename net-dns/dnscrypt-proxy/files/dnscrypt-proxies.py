@@ -19,6 +19,7 @@ from collections import OrderedDict
 from string import Template
 from random import sample
 from time import sleep
+from getopt import gnu_getopt, GetoptError
 from socket import AF_INET, AF_INET6, SOCK_STREAM, SOCK_DGRAM
 from importlib.util import find_spec
 
@@ -46,9 +47,10 @@ ERR_GETSOCK = 'failed to get listening socket: '
 ERR_NOTBOOLEAN = 'not a boolean'
 ERR_UNEXPECTEDOPTS = "unexpected options in [{}]: {}"
 MSG_USAGE = """
-options: --help    | -h (help)
-         --verbose | -v (verbose)
-         --config  | -f <config_file>"""
+options: --help          | -h (help)
+         --verbose       | -v (verbose)
+         --check-config  | -c (check config and exit; console logging)
+         --config <file> | -f <file> (config file)"""
 ERR_CONFFILE = 'Failed to find config file'
 ERR_NOTFILE = 'file not exists/not a file'
 
@@ -571,6 +573,7 @@ class App:
         self._daemon = None
         self._statinterval = None
 
+        self.only_check_config = False
         self._config_file = None
         self.config = configparser.ConfigParser(strict=True, inline_comment_prefixes=(';',))
         self.config.SECTCRE = re.compile(r"\[\s*(?P<header>[^]]+?)\s*\]", re.I)
@@ -594,7 +597,6 @@ class App:
         self._daemon = which(DAEMON)
         if not self._daemon:
             raise MyError("executable '{}' not found".format(DAEMON), logerror=False)
-        self.logger.info('Initialized')
 
     def _load_config(self):
         self.logger.debug('Reading config '+str(self._config_file))
@@ -635,7 +637,7 @@ class App:
                     hnd = logging.handlers.WatchedFileHandler(log)
                     hnd.setFormatter(self._file_formatter)
 
-                if tgt != 'console':
+                if tgt != 'console' and not self.only_check_config:
                     self.logger.debug('Switching logging to '+tgt)
                     oldhandlers = list(self.logger.handlers)
                     self.logger.addHandler(hnd)
@@ -674,48 +676,49 @@ class App:
         return record
 
     def _parse_cmdline(self, _argv):
-        argv = list(_argv)
+        lopts = {'help': ('h', False), 'verbose': ('v', False),
+                 'config': ('f', True), 'check-config': ('c', False)}
+        try:
+            ov, left = gnu_getopt(_argv, ''.join([v[0] + (':' if v[1] else '') for k, v in lopts.items()]),
+                                  [k + ('=' if v[1] else '') for k, v in lopts.items()])
+        except GetoptError as geterr:
+            raise MyCmdlineError(str(geterr))
 
-        # noinspection PyPep8,PyShadowingNames
-        def _eat_option(option, loption=None):
-            found, first, last, left, idx = False, None, None, None, None
-            try:
-                idx = argv.index('-' + option)
-            except ValueError:
-                try:
-                    if loption is not None:
-                        idx = argv.index('--' + loption)
-                except ValueError:
-                    pass
-            if idx is not None:
-                found, first, last, left = True, idx==0, idx==len(argv)-1, len(argv)-1
-                del argv[idx]
-            return found, first, last, left
+        if left:
+            raise MyCmdlineError('unexpected '+', '.join(["'"+a+"'" for a in left]))
 
-        found, first, last, left = _eat_option('h', 'help')
-        if found:
-            if not left:
+        od = dict()
+        for o, v in ov:
+            o = o.lstrip('-')
+            opt = lopts.get(o, None)
+            if opt is None:
+                opt, sopt = o, '-' + o
+            else:
+                opt, sopt = opt[0], '--' + o
+            if opt in od:
+                raise MyCmdlineError("recurring '{}'".format(sopt))
+            od[opt] = v
+
+        if 'h' in od:
+            if len(od) > 1:
+                raise MyCmdlineError()
+            else:
                 raise MyUsageException()
-            else:
-                raise MyCmdlineError()
+        if 'v' in od and 'c' in od:
+            raise MyCmdlineError()
+        if 'f' in od:
+            f = od['f']
+            if f == '' or f.startswith('-'):
+                raise MyCmdlineError("seems '{}' is not valid config file".format(f))
+        if 'c' in od and 'f' not in od:
+            raise MyCmdlineError('no config file to check, consider -f|--config option')
 
-        found, first, last, left = _eat_option('v', 'verbose')
-        if found:
-            if first or last:
-                self.logger.setLevel(logging.DEBUG)
-            else:
-                raise MyCmdlineError()
-
-        found, first, last, left = _eat_option('f', 'config')
-        if found:
-            if first and left == 1:
-                self._config_file = argv[0]
-                del argv[0]
-            else:
-                raise MyCmdlineError()
-
-        if len(argv):
-            raise MyCmdlineError('unexpected '+', '.join(["'"+a+"'" for a in argv]))
+        if 'v' in od:
+            self.logger.setLevel(logging.DEBUG)
+        if 'f' in od:
+            self._config_file = od['f']
+        if 'c' in od:
+            self.only_check_config = True
 
     def _find_config_file(self):
         if self._config_file:
@@ -831,7 +834,7 @@ class App:
 
             for i in self.instances.values():
                 if i.is_process_alive():
-                    self.logger.info('Sending SIGTERM to ' + i.instance_name)
+                    self.logger.debug('Sending SIGTERM to ' + i.instance_name)
                     try:
                         os.kill(i.process.pid, signal.SIGTERM)
                     except ProcessLookupError:
@@ -870,6 +873,11 @@ if __name__ == '__main__':
                                     if v is not None]))
         # noinspection PyTypeChecker
         app.init_instances(Instance)
+
+        if app.only_check_config:
+            app.logger.debug('Seems config is valid, exiting')
+            sys.exit(0)
+
         app.rearm_timer(SERVICE_THREADS_DELAY)
         app.run_instances()
         app.logger.info('Clean exit')

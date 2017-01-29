@@ -4,12 +4,12 @@
 # $Id$
 
 command=/usr/libexec/dnscrypt-proxies.py
+command_args="-f /etc/dnscrypt-proxy/dnscrypt-proxies.conf"
 required_dirs=/var/log/dnscrypt-proxy
 pidfile=/var/run/dnscrypt-proxies.pid
 start_stop_daemon_args="--interpreted --pidfile ${pidfile} --make-pidfile"
 command_background=yes
 
-name="dnscrypt-proxies"
 description="invokes and keeps dnscrypt-proxy instances in one place"
 
 depend() {
@@ -17,4 +17,11 @@ depend() {
 	before dns
 	use logger
 	provide cryptodns
+}
+
+start_pre() {
+	# check config
+	ebegin "Checking ${RC_SVCNAME}' config"
+	$command -c $command_args
+	eend $?
 }
