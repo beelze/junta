@@ -35,7 +35,7 @@ CONFIG_LOCATIONS = [str(Path(__file__).parent / (MYNAME+'.conf')),
                     '/etc/dnscrypt-proxy/'+MYNAME+'.conf']
 CONFIG_BOOLEANS = {'yes': True, 'true': True, 'on': True, 'no': False, 'false': False, 'off': False}
 CONFIG_MODES = ('config', 'list', 'manual', 'random')
-INSTANCE_OPTS = ('mode', 'nrandom', 'blocklist', 'config', 'logfile', 'loglevel', 'localaddress',
+INSTANCE_OPTS = ('mode', 'nrandom', 'filter', 'config', 'logfile', 'loglevel', 'localaddress',
                  'resolverslist', 'providerkey', 'resolveraddress',
                  'ephemeralkeys', 'tcponly', 'maxactiverequests', 'ednspayloadsize', 'user')
 
@@ -61,11 +61,10 @@ if sys.hexversion < (MINVER[0] * 0x100 + MINVER[1]) * 0x10000:
 psutil = None
 if find_spec('psutil'):
     import psutil
-else:
-    pass
-    # print("Failed to find psutil module, advanced functionality is disabled\n"
-    #       "Consider installing psutil in your package manager or just run 'pip install psutil,'\n"
-    #       "...but ensure you're installing psutil for python3!\n", file=sys.stderr)
+# else:
+#     print("Failed to find psutil module, advanced functionality is disabled\n"
+#           "Consider installing psutil in your package manager or just run 'pip install psutil,'\n"
+#           "...but ensure you're installing psutil for python3!\n", file=sys.stderr)
 
 
 def _get_pwname(name_or_uid):
@@ -103,20 +102,11 @@ def _load_opt(option, value):
         else:
             return False, "valid modes are: {}".format(', '.join(CONFIG_MODES))
 
-    elif option == 'blocklist':
-        v = []
+    elif option == 'filter':
         try:
-            for item in [f.strip() for f in value.split(',')]:
-                fld, sep, regex = item.partition(':')
-                fld, regex = fld.strip(), regex.strip()
-                if not fld or not regex:
-                    raise ValueError()
-                else:
-                    v.append((fld, re.compile(regex, re.I)))
-            return True, v
-
-        except Exception as e:
-            return False, str(e)+' (expected comma-delimited list of field:regexp)'
+            return True, ResolverFilter(value)
+        except ValueError as e:
+            return False, str(e)
 
     elif option in ('localaddress', 'resolveraddress'):
         try:
@@ -186,7 +176,7 @@ def _load_opts(config, section, setter):
 
 def _check_opt(section, option, value):
     if section != 'common':
-        if option in ('blocklist', 'nrandom'):
+        if option in ('filter', 'nrandom'):
             raise MyConfigNotAllowedError('allowed only in [common]', section, option)
         if option == 'mode' and value == 'random':
             raise MyConfigNotAllowedError('allowed only in [common]', section, option, value)
@@ -194,6 +184,160 @@ def _check_opt(section, option, value):
         if option in ('providerkey', 'resolveraddress'):
             raise MyConfigNotAllowedError('allowed only in instance sections', section, option, value)
     return True
+
+
+class ResolverFilter:
+    RE_COND = re.compile(r'(?:(?P<fld>\w+)|\[(?P<lfld>[\w ]+)\])\s*(?P<op>=~|==|!~|!=)\s*'
+                         r'(?:"(?P<q>(?:[^"]|(?<=\\)")*)"|\'(?P<dq>(?:[^\']|(?<=\\)\')*)\')')
+    RE_OTHER = re.compile(r'(?:(?:^|[\s()]+?)(?:and|or|not)[\s()]+?|[\s()]+?)+', re.I)
+
+    FLDS_DEF = 'Name:name,Full name:fullname,Description:desc,Location:loc,' \
+               'Coordinates:coords,URL:url,Version:ver,DNSSEC validation:dnssec,' \
+               'No logs:nologs,Namecoin:ncoin,Resolver address:addr,Provider name:fqdn,' \
+               'Provider public key:pubkey,Provider public key TXT record:txt'
+
+    STR_OP = {'==': 'EQ', '!=': 'NE', '=~': 'LK', '!~': 'UL'}
+
+    _flds = dict({s.lower(): l.lower() for l, s in [d.split(':') for d in FLDS_DEF.split(',')]})
+    _r_flds = dict({l: f for f, l in _flds.items()})
+
+    def __init__(self, fdef):
+        self._test_names = set()
+        self._globals = {'__builtins__': None}
+        self._match_mode = True
+
+        fdef = re.sub(r'\s*\n', ' ', fdef.strip())
+        m = re.match(r'^(|!)(?:match):\s*', fdef)
+        if m:
+            fdef = fdef[m.end():]
+            if m.group(1) == '!':
+                self._match_mode = False
+
+        if fdef == '':
+            raise ValueError('empty filter expression')
+
+        self._expr, self._need_fields = self._prepare(fdef)
+        try:
+            self._code = compile(self._expr, '<filter>', 'eval')
+        except (SyntaxError, TypeError) as c_err:
+            raise ValueError("failed to compile filter expression: " + str(c_err))
+
+    def _new_test_name(self, fld, op, rval):
+        name = '_{}_{}_{}'.format(self.STR_OP[op], fld, re.sub(r'\W', '_', rval if rval else '_'))
+
+        def safename(index):
+            return name + ('' if index == 0 else '_' + str(i))
+
+        i = 0
+        while safename(i) in self._test_names:
+            i += 1
+        name = safename(i)
+        self._test_names.add(name)
+        return name
+
+    @staticmethod
+    def _new_test_func(op, rval):
+        if op in ('==', '!='):
+            def f_eq(fld):
+                _fld = fld.lower()
+                return _fld == rval if op == '==' else not _fld == rval
+
+            return f_eq
+
+        else:
+            def f_like(fld):
+                m = rval.search(fld) is not None
+                return m if op == '=~' else not m
+
+            return f_like
+
+    def _get_fldname(self, name=None, longname=None, silent=False):
+        if name is not None:
+            _name = name.lower()
+            if _name in self._flds:
+                return _name
+            else:
+                if silent:
+                    return None
+                else:
+                    raise ValueError("unexpected field (short): '{}'".format(name))
+        else:
+            sname = self._r_flds.get(longname.lower(), None)
+            if sname is not None:
+                return sname
+            else:
+                if silent:
+                    return None
+                else:
+                    raise ValueError("unexpected field: '{}'".format(longname))
+
+    def _prepare(self, fdef):
+        used_fields = set()
+        regexs, fails = (self.RE_OTHER, self.RE_COND), 0
+        lfdef, i, pos = len(fdef), 0, 0
+        accum = ''
+
+        while True:
+            m = regexs[i % 2].match(fdef, pos)
+            if m:
+                fails = 0
+                d = m.groupdict()
+                if d:
+                    fld = self._get_fldname(d['fld'], d['lfld'])
+                    used_fields.add(fld)
+                    op, rval = d['op'], d['q'] or d['dq']
+
+                    if op in ('==', '!='):
+                        rval_arg = rval.lower()
+                    else:
+                        if rval == '':
+                            raise ValueError("empty regular expression for '{} {}'".format(fld, op))
+                        try:
+                            rval_arg = re.compile(rval, re.I)
+                        except re.error as reerr:
+                            raise ValueError("invalid regular expression ({}): {!r}".format(reerr, rval))
+
+                    fname = self._new_test_name(fld, op, rval)
+                    func = self._new_test_func(op, rval_arg)
+
+                    accum += '{}({})'.format(fname, fld)
+                    self._globals[fname] = func
+
+                else:
+                    accum += m.group(0).lower()
+                pos = m.end()
+                if pos == lfdef:
+                    break
+            else:
+                fails += 1
+
+            if fails == 2:
+                break
+
+            i += 1
+
+        residue = fdef[pos:]
+        if residue == '':
+            return accum, used_fields
+        else:
+            raise ValueError('failed to parse from position {}: {!r}'.format(pos, residue))
+
+    @classmethod
+    def fields_dict(cls):
+        return dict(cls._r_flds)
+
+    def filter(self, row):
+        _row = dict({f: v for f, v in
+                     [(self._get_fldname(longname=lf, silent=True), v) for lf, v in row.items()] if f is not None})
+        rset = set(_row)
+        if not self._need_fields <= rset:
+            raise ValueError("expected more field(s): " +
+                             ', '.join(['{}({})'.format(self._flds[f], f) for f in self._need_fields - rset]))
+        try:
+            res = eval(self._code, self._globals, _row)
+        except Exception as evalerr:
+            raise ValueError('failed to eval filter expression: ' + str(evalerr))
+        return res if self._match_mode else not res
 
 
 class IPPort(str):
@@ -282,7 +426,9 @@ class IPPort(str):
 
 
 class MyError(Exception):
-    def __init__(self, msg, exitcode=1, logerror=True):
+    def __init__(self, msg, exitcode=1, logerror=True, fold_line=False):
+        if fold_line:
+            msg = re.sub(r'\s*\n', ' ', msg)
         self.msg, self.exitcode, self.logerror = msg, exitcode, logerror
         super().__init__(msg)
 
@@ -295,22 +441,27 @@ class MyCmdlineError(MyError):
 
 class MyUsageException(MyError):
     def __init__(self):
-        super().__init__(msg=MSG_USAGE.strip(), exitcode=0, logerror=False)
+        flds = ResolverFilter.fields_dict()
+        mlen = max([len(l) for l in flds])
+        ftext = '\n'.join(('{:' + str(mlen+2) + '} | {}').format('[' + l + ']', flds[l]) for l in sorted(flds))
+        fhdr = 'List of resolvers list fields (for use in filter): [native long name] | short_alias'
+        super().__init__(msg='{}\n\n{}\n\n{}'.format(MSG_USAGE.strip(), fhdr, ftext), exitcode=0, logerror=False)
 
 
 class MyConfigValueError(MyError):
-    def __init__(self, msg, section, option, value):
-        super().__init__("Invalid value '{}' for [{}].{}: {}".format(value, section, option, msg))
+    def __init__(self, msg, section, option, value, fold_line=True):
+        super().__init__("Invalid value '{}' for [{}].{}: {}".format(value, section, option, msg), fold_line=fold_line)
 
 
 class MyConfigUniqueError(MyError):
-    def __init__(self, section, option, value):
-        super().__init__("Value '{}' for [{}].{} is not unique".format(value, section, option))
+    def __init__(self, section, option, value, fold_line=True):
+        super().__init__("Value '{}' for [{}].{} is not unique".format(value, section, option), fold_line=fold_line)
 
 
 class MyConfigNotAllowedError(MyError):
-    def __init__(self, msg, section, option, value=None):
-        super().__init__("[{}]: {}{} {}".format(section, option, '' if value is None else '='+str(value), msg))
+    def __init__(self, msg, section, option, value=None, fold_line=True):
+        super().__init__("[{}]: {}{} {}".format(section, option, '' if value is None else '='+str(value), msg),
+                         fold_line=fold_line)
 
 
 class MyConfigUnexpectedOpts(MyError):
@@ -641,6 +792,7 @@ class App:
                 if tgt != 'console' and not self.only_check_config:
                     self.logger.debug('Switching logging to '+tgt)
                     oldhandlers = list(self.logger.handlers)
+                    # noinspection PyUnboundLocalVariable
                     self.logger.addHandler(hnd)
 
                     if tgt == 'syslog':
@@ -725,7 +877,7 @@ class App:
         if self._config_file:
             locs = [self._config_file]
         else:
-            locs = list(CONFIG_LOCATIONS)
+            locs = CONFIG_LOCATIONS
 
         for loc in locs:
             p = Path(loc)
@@ -738,28 +890,51 @@ class App:
         else:
             raise MyError(ERR_CONFFILE)
 
-    def _random_resolvers(self, cnt, file, blocklist):
-        def in_blocklist(dct):
-            for f, regex in blocklist:
-                if f in dct and regex.search(dct[f]):
-                    return True
-            return False
+    def _check_resolver_list_fields(self, row, resolverfilter):
+        r_s, f_s = set([f.lower() for f in row]), set(resolverfilter.fields_dict())
+        if r_s != f_s:
+            msg = 'seems resolvers list record format has been changed ' \
+                  'and no longer matches internal representation:\n' \
+                  '[+] fields: {}\n' \
+                  '[-] fields: {}\n' \
+                  'please file a bug to https://github.com/beelze/junta/issues'.format(', '.join(sorted(r_s - f_s)),
+                                                                                       ', '.join(sorted(f_s - r_s)))
+            self.logger.warning(msg)
 
-        resolvers, filtered = set(), 0
+    def _random_resolvers(self, cnt, file, resolverfilter):
+        fmt = 'filter[{{}}]: {0[Name]} ({0[Full name]}) {0[Resolver address]}'
+        resolvers, filtered, firstpass = set(), 0, True
+
         self.logger.debug('Trying to parse (csv) resolvers list from '+file)
         try:
             with open(file) as csvfile:
                 reader = csv.DictReader(csvfile)
                 for row in reader:
-                    if not in_blocklist(row):
+                    if firstpass:
+                        firstpass = False
+                        self._check_resolver_list_fields(row, resolverfilter)
+                    add = True
+                    if resolverfilter:
+                        msg = fmt.format(row)
+                        if resolverfilter.filter(row):
+                            msg = msg.format('+')
+                        else:
+                            add = False
+                            filtered += 1
+                            msg = msg.format('-')
+                        self.logger.debug(msg)
+
+                    if add:
                         resolvers.add(row['Name'])
-                    else:
-                        filtered += 1
         except Exception as e:
-            raise configparser.Error('Error when parsing resolvers list: '+str(e))
+            raise MyError('Error reading/filtering resolvers list: '+str(e))
 
         lr = len(resolvers)
-        self.logger.debug("{} suitable resolvers found, {} filtered out".format(lr, filtered))
+        if resolverfilter:
+            self.logger.debug("{} suitable resolvers found, {} filtered out".format(lr, filtered))
+        else:
+            self.logger.debug("{} resolvers found".format(lr))
+
         if lr < cnt:
             self.logger.warning("There aren't enough resolvers: {}, but {} requested".format(lr, cnt))
             cnt = lr
@@ -774,11 +949,11 @@ class App:
             if instance_sections:
                 self.logger.warning(
                     "Random mode selected ({} instances), all defined instance sections are ignored: {}".format(
-                        klass.nrandom, ", ".join(instance_sections)))
+                        klass.nrandom, ', '.join(instance_sections)))
 
             if not klass.resolverslist or not klass.localaddress:
                 raise MyError('[common].ResolversList/LocalAddress are mandatory in random mode')
-            for resolver in self._random_resolvers(klass.nrandom, klass.resolverslist, klass.blocklist):
+            for resolver in self._random_resolvers(klass.nrandom, klass.resolverslist, klass.filter):
                 self.instances[resolver] = klass({'mode': 'list'}, resolver)
 
         else:
@@ -870,7 +1045,7 @@ if __name__ == '__main__':
         app.logger.debug('Default instance parameters: ' +
                          ', '.join(['{}={}'.format(n, v) for n, v in
                                     [(o, getattr(Instance, o)) for o in
-                                    set(INSTANCE_OPTS) - {'blocklist', 'nrandom'}]
+                                    set(INSTANCE_OPTS) - {'filter', 'nrandom'}]
                                     if v is not None]))
         # noinspection PyTypeChecker
         app.init_instances(Instance)
