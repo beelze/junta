@@ -4,19 +4,19 @@
 
 EAPI=5
 
-inherit autotools eutils flag-o-matic git-r3
+inherit autotools flag-o-matic eutils systemd
 
 DESCRIPTION="BitTorrent Client using libtorrent"
 HOMEPAGE="https://rakshasa.github.io/rtorrent/"
-EGIT_REPO_URI="git://github.com/rakshasa/${PN}.git"
-EGIT_BRANCH="feature-bind"
+SRC_URI="http://rtorrent.net/downloads/${P}.tar.gz"
 
 LICENSE="GPL-2"
 SLOT="0"
-KEYWORDS=""
-IUSE="+daemon debug ipv6 selinux test +xmlrpc"
+KEYWORDS="amd64 ~arm ~hppa ~ia64 ppc ppc64 ~sparc x86 ~x86-fbsd ~amd64-linux ~arm-linux ~x86-linux ~ppc-macos ~x64-macos ~x86-macos ~sparc-solaris ~x64-solaris"
+IUSE="daemon debug ipv6 selinux test xmlrpc"
 
-COMMON_DEPEND="=net-libs/libtorrent-9999
+COMMON_DEPEND="~net-libs/libtorrent-0.13.${PV##*.}
+	>=dev-libs/libsigc++-2.2.2:2
 	>=net-misc/curl-7.19.1
 	sys-libs/ncurses:0=
 	xmlrpc? ( dev-libs/xmlrpc-c )"
@@ -31,6 +31,14 @@ DEPEND="${COMMON_DEPEND}
 DOCS=( doc/rtorrent.rc )
 
 src_prepare() {
+	# bug #358271
+	epatch \
+		"${FILESDIR}"/${PN}-0.9.1-ncurses.patch \
+		"${FILESDIR}"/${PN}-0.9.4-tinfo.patch
+
+	# https://github.com/rakshasa/rtorrent/issues/332
+	cp "${FILESDIR}"/rtorrent.1 "${S}"/doc/ || die
+
 	eautoreconf
 }
 
@@ -48,9 +56,11 @@ src_configure() {
 
 src_install() {
 	default
+	doman doc/rtorrent.1
 
 	if use daemon; then
 		newinitd "${FILESDIR}/rtorrentd.init" rtorrentd
 		newconfd "${FILESDIR}/rtorrentd.conf" rtorrentd
+		systemd_newunit "${FILESDIR}/rtorrentd_at.service" "rtorrentd@.service"
 	fi
 }
