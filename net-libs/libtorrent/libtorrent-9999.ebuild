@@ -36,6 +36,7 @@ DEPEND="${RDEPEND}
 src_prepare() {
 	eautoreconf
 	elibtoolize
+	epatch_user
 }
 
 src_configure() {

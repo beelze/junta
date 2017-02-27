@@ -18,7 +18,7 @@ IUSE="+daemon debug ipv6 selinux test +xmlrpc"
 
 COMMON_DEPEND="=net-libs/libtorrent-9999
 	>=net-misc/curl-7.19.1
-	sys-libs/ncurses:0=
+	sys-libs/ncurses:0=[-tinfo]
 	xmlrpc? ( dev-libs/xmlrpc-c )"
 RDEPEND="${COMMON_DEPEND}
 	daemon? ( app-misc/screen )
@@ -32,6 +32,7 @@ DOCS=( doc/rtorrent.rc )
 
 src_prepare() {
 	eautoreconf
+	epatch_user
 }
 
 src_configure() {
