@@ -4,12 +4,12 @@
 
 EAPI=5
 
-inherit autotools flag-o-matic git-r3 libtool toolchain-funcs
+inherit eutils flag-o-matic libtool toolchain-funcs
 
 DESCRIPTION="BitTorrent library written in C++ for *nix"
 HOMEPAGE="https://rakshasa.github.io/rtorrent/"
-EGIT_REPO_URI="git://github.com/rakshasa/${PN}.git"
-EGIT_BRANCH="feature-bind"
+COMMIT="c167c5a9e0bcf0df23ae5efd91396aae0e37eb87"
+SRC_URI="https://github.com/rakshasa/${PN}/archive/${COMMIT}.tar.gz -> ${P}.tar.gz"
 
 LICENSE="GPL-2"
 
@@ -19,8 +19,8 @@ LICENSE="GPL-2"
 # subslot.
 SLOT="0"
 
-KEYWORDS=""
-IUSE="-debug -libressl +ssl -test"
+KEYWORDS="~amd64 ~arm ~hppa ~ia64 ppc ppc64 ~sparc x86 ~x86-fbsd ~amd64-linux ~arm-linux ~x86-linux ~ppc-macos ~x64-macos ~x86-macos ~sparc-solaris ~x64-solaris"
+IUSE="debug libressl ssl test"
 
 RDEPEND="
 	sys-libs/zlib
@@ -34,7 +34,6 @@ DEPEND="${RDEPEND}
 	test? ( dev-util/cppunit )"
 
 src_prepare() {
-	eautoreconf
 	elibtoolize
 }
 
