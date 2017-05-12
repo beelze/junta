@@ -19,7 +19,7 @@ RESTRICT="test"
 
 COMMON_DEPEND="
 	>=dev-cpp/glibmm-2.36
-	dev-cpp/gtkmm:2.4
+	dev-cpp/gtkmm:3.0
 	>=dev-libs/boehm-gc-6.4
 	dev-libs/gdl
 	>=dev-libs/glib-2.6.5
