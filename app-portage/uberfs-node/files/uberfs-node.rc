@@ -1,0 +1,708 @@
+#!/sbin/openrc-run
+
+extra_commands="xstatus"
+extra_started_commands="xrestart force_dirty force_clean"
+extra_stopped_commands="build"
+
+OF_CHECK_INTERVAL=2
+DEFAULT_BACKUP_CNT=1
+DEFAULT_MKSQUASH_OPTS='-no-duplicates -no-progress'
+
+SVC=${SVCNAME%%.*}
+NODE=${SVCNAME:$((${#SVC}+1))}
+V_PRFX=UBERFS
+
+OFVS_DIR="/dev/shm/.${SVC}/$NODE"
+RO_DIR="/tmp/.${SVC}.ro/${NODE}"
+UPPER_DIR="$OFVS_DIR/upper"
+WORK_DIR="$OFVS_DIR/work"
+
+depend() {
+	after bootmisc
+}
+
+debug_print() {
+	yesno $(prm debug) && ewarn "-- $@"
+}
+
+debug_print_func() {
+	debug_print "[line ${BASH_LINENO[1]}] ${FUNCNAME[1]} $@"
+}
+
+# array of msg
+# msg:=msg|<iI|eE|wW>!msg>#
+declare -a MSG
+
+# name [saved]
+prm() {
+	local name=${1^^}
+	if [[ -n "$2" ]]; then
+		service_get_value $name
+	else
+		name="${V_PRFX}_${name}"
+		echo "${!name}"
+	fi
+}
+
+PRM() {
+	prm $1 saved
+	debug_print "PRM: ${1}='$(prm $1 saved)'"
+}
+
+# name value
+save_prm() {
+	local name=${1^^} value="$2"
+	[[ -n "$2" ]] || value="$(prm $name)"
+	debug_print "save_prm: ${1}='$value'"
+	service_set_value $name "$value"
+}
+
+# [ lines [prefix] ]
+print_msg() {
+	local i line eflag efunc
+
+	if (($#)); then
+		readarray -t MSG <<< "$1"
+		shift
+		if (($#)); then
+			for ((i=0; i<${#MSG[@]}; i++)); do
+				MSG[$i]="${1}${MSG[$i]}"
+			done
+		fi
+	fi
+
+    for ((i=0; i<${#MSG[@]}; i++)); do
+		line="${MSG[i]}"
+		if [[ "$line" =~ ^([iewIEW])!(.*)$ ]]; then
+			case ${BASH_REMATCH[1],,} in
+				i) efunc=einfo ;;
+				w) efunc=ewarn ;;
+				e) efunc=eerror ;;
+			esac
+			line="${BASH_REMATCH[2]}"
+		else
+			efunc=einfo
+		fi
+		eval "$efunc "'"$line"'
+	done
+}
+
+get_compressors() {
+	unsquashfs 2>&1 -h | awk '{if($0~"^Decompressors available:"){a=1; next;}; if(a==1) print $1;}' | paste -s -d' '
+}
+
+first_compressor() {
+	local -a cmprs
+	cmprs=( $(get_compressors) )
+	echo ${cmprs[0]}
+}
+
+# compressor
+has_compressor() {
+	[[ $(get_compressors) =~ (^| )${1}( |$) ]]
+}
+
+coerce_compressor() {
+	local cmpr=$(prm compression) f_cmpr=$(first_compressor)
+	if ! has_compressor $cmpr; then
+		if yesno $(prm use_fallback_compression); then
+			if [[ -n $f_cmpr ]]; then
+				echo $f_cmpr
+				return 1
+			fi
+		fi
+		return 1
+	else
+		echo $cmpr
+		return 0
+	fi
+}
+
+check_compressor() {
+	local use_cmpr res
+
+	debug_print_func
+
+	use_cmpr=$(coerce_compressor); res=$?
+	[[ $res -eq 1 ]] && MSG+=("w!Compressor '$(prm compression)' not available, falling back to '${use_cmpr}'")
+
+	if [[ -z $use_cmpr ]]; then
+		MSG+=("e!Invalid compressor, check ${V_PRFX}_COMPRESSION and ${V_PRFX}_USE_FALLBACK_COMPRESSION")
+		MSG+=("w!  Compressors available: $(get_compressors)")
+		return 1
+	fi
+	if service_stopping; then
+		[[ $(PRM 'use_compressor' ) != $use_cmpr ]] && {
+			MSG+=("w!Selected compressor has been changed to '${use_cmpr}' (binary recompiled or config parameter changed)");
+			MSG+=('w!  all backups (if any) may became unusable'); }
+	fi
+	save_prm 'use_compressor' $use_cmpr
+	return 0
+}
+
+check_standalone() {
+	debug_print_func
+
+	if [[ -z $NODE ]]; then
+		MSG+=("w!You are not supposed to run this script directly,")
+		MSG+=("w!  instead create a symlink for node (ln -s $SVC $SVC.NODE),")
+		MSG+=("w!  copy/uncomment/edit /etc/conf.d/$SVC.NODE appropriately.")
+		MSG+=("w!Consider using 'build' command to create initial squashed image if needed")
+		return 1
+	fi
+	return 0
+}
+
+# binary [package]
+check_binary() {
+	if [[ -x $(which $1 2>/dev/null) ]]; then
+		return 0
+	else
+		[[ -n "$2" ]] && MSG+=("e!Binary not found: $1. Consider installing $2")
+		return 1
+	fi
+}
+
+check_binaries() {
+	local o= res=0 ofh=
+	local -a ofh_order
+
+	debug_print_func
+
+	check_binary mksquashfs 'sys-fs/squashfs-tools' || res=1
+	check_binary unsquashfs 'sys-fs/squashfs-tools' || res=1
+
+	yesno $(prm prefer_lsof) && ofh_order=(fuser lsof) || ofh_order=(lsof fuser)
+	for o in ${ofh_order[@]}; do
+		check_binary $o && ofh=$o
+	done
+	[[ -n $ofh ]] || {
+		MSG+=("e!Binaries not found: ${ofh_order[*]}. Consider installing either sys-process/psmisc or sys-process/lsof");
+		res=1; }
+	save_prm 'ofh' $ofh
+	local ofh_preferred=${ofh_order[${#ofh_order[@]}-1]}
+	[[ $ofh == $ofh_preferred ]] || MSG+=("w!Using $ofh instead of $ofh_preferred!")
+
+	return $res
+}
+
+check_fs() {
+	grep -Es "[[:blank:]]${1}$" /proc/filesystems >/dev/null
+}
+
+other_system_checks() {
+	local res=0 can_rw=yes
+
+	debug_print_func
+
+	[[ -w /dev/loop0 ]] || { MSG+=('e!no loopback support!'); res=1; }
+
+	if ! check_fs squashfs; then
+		einfo 'Trying to load squashfs module...'
+		modprobe -q squashfs
+		check_fs squashfs || {
+			MSG+=('e!No squashfs support! Check for squashfs in kernel (CONFIG_SQUASHFS)');
+			res=1; }
+	fi
+
+	if ! check_fs overlay; then
+		einfo 'Trying to load overlay module...'
+		modprobe -q overlay
+		check_fs overlay || {
+			MSG+=('w!No overlayfs support! Check for overlayfs in kernel (CONFIG_OVERLAY_FS)');
+			can_rw=no; }
+	fi
+	save_prm 'can_rw' $can_rw
+	return $res
+}
+
+correct_path() {
+	local rst=1
+	shopt -q extglob && rst=0
+	shopt -s extglob
+
+	local p="${1%%+(/)}"
+	p=${p//+(\/)//}
+
+	[[ $rst -eq 1 ]] && shopt -u extglob
+    echo "$p"
+	[[ -n "$p" && "$p" != / && ${p:0:1} == / ]]
+}
+
+check_vars () {
+	local res=0 td= tmp=
+
+	debug_print_func
+
+	tmp="$(prm image)"
+	[[ ( -n "$tmp" && ${tmp:0:1} != / ) || "$tmp" == / ]] && {
+		MSG+=("e!Invalid image definition '$tmp' (relative path or root). See ${V_PRFX}_IMAGE");
+		res=1; }
+
+	if tmp=$(correct_path "$(prm mount)"); then
+		save_prm 'mount' "$tmp"
+		tmp="$(prm image)"
+		[[ -n "$tmp" ]] || tmp="$(PRM mount).sqfs"
+		save_prm 'image' "$tmp"
+	else
+		MSG+=("e!Wrong mountpoint '$(prm mount)'. See ${V_PRFX}_MOUNT")
+		res=1
+	fi
+
+	yesno $(prm force_ro) && save_prm force_ro 'yes' || save_prm force_ro 'no'
+	save_prm force_changed ''
+
+	td=$(mktemp -d ${SVCNAME}.XXXXXX)
+
+	tmp=$(prm owner)
+	[[ -n "$tmp" ]] || tmp='portage:portage'
+	chown -f $tmp $td 2>/dev/null && save_prm 'owner' $tmp || {
+		MSG+=("e!Invalid owner '$tmp'. See ${V_PRFX}_OWNER");
+		res=1; }
+
+	tmp=$(prm mode)
+	[[ -n "$tmp" ]] || tmp=770
+	chmod "$tmp" $td 2>/dev/null && save_prm 'mode' $tmp || {
+		MSG+=("e!Invalid mode '$tmp'. See ${V_PRFX}_MODE");
+		res=1; }
+
+    tmp=$(prm backup_cnt)
+    if [[ -n "$tmp" ]]; then
+        [[ $tmp =~ ^[0-9]+$ ]] || { MSG+=("Invalid backup count '$tmp'. See ${V_PRFX}_BACKUP_CNT"); res=1; }
+    else
+        tmp=$DEFAULT_BACKUP_CNT
+    fi
+	save_prm 'backups' $tmp
+
+    tmp=$(prm wait_files)
+    if [[ -n "$tmp" ]]; then
+        [[ $tmp =~ ^[0-9]+$ ]] || { MSG+=("Invalid wait on close '$tmp'. See ${V_PRFX}_WAIT_FILES"); res=1; }
+    else
+        tmp=0
+    fi
+	save_prm 'wait_close' $tmp
+
+	tmp=$(prm mksqfs_opts)
+	[[ "$tmp" =~ -force-[ug]id|-comp|-root-becomes ]] && { MSG+=("Invalid mksquashfs options '$tmp'. See ${V_PRFX}_MKSQFS_OPTS"); res=1; } || save_prm 'mkopts' "$tmp"
+
+	rmdir $td 2>/dev/null
+	return $res
+}
+
+# mask
+has_files() {
+	local files=$(shopt -qs nullglob dotglob extglob; echo ${1})
+	if ((${#files})); then
+		debug_print_func "$1: yes =${files}="
+		return 0
+	else
+		debug_print_func "$1: no"
+		return 1
+	fi
+}
+
+is_dirty() {
+	has_files $UPPER_DIR/*
+}
+
+is_dirty_or_forced() {
+    local force_changed=$(PRM force_changed)
+	[[ $force_changed == 'on' ]] || is_dirty && [[ $force_changed != 'off' ]]
+}
+
+create_image() {
+    local uid= gid= opts= tmp=
+
+	debug_print_func "$@"
+
+	[[ $(PRM owner) =~ ^([[:alnum:]_]+):([[:alnum:]_]+)$ ]]
+	uid=$(getent passwd ${BASH_REMATCH[1]} | cut -d: -f3)
+	gid=$(getent group ${BASH_REMATCH[2]} | cut -d: -f3)
+
+    opts="$DEFAULT_MKSQUASH_OPTS $(PRM mkopts) -force-uid $uid -force-gid $gid -comp $(PRM use_compressor)"
+	debug_print "mksquashfs options: $opts"
+
+    rm -f "$1"
+    mksquashfs "$(PRM mount)" "$1" $opts 2>&1 || rm -f "$1"
+}
+
+# [build]
+rebuild_image() {
+	debug_print_func "$@"
+
+    local msg= img="$(PRM image)" newimg= force_changed=$(PRM force_changed)
+
+	[[ $1 == 'build' ]] && newimg="$img" || newimg="${img}.~"
+
+	if is_dirty_or_forced || [[ $1 == 'build' ]]; then
+        einfo "Creating image [$(PRM use_compressor)] ..."
+
+        if ! msg=$(create_image "$newimg"); then
+            eerror "Failed: $msg"
+			return 1
+        else
+			local sz=$(stat -c%s "$newimg")
+            einfo "Created $(numfmt --to=iec-i --suffix=B --format='%f' $sz) image"
+			if [[ $1 != 'build' ]]; then
+				einfo "Processing backups..."
+				backup
+				mv "$newimg" "$img"
+				return
+			else
+				return 0
+			fi
+        fi
+	else
+		debug_print_func ': nothing to do'
+		return 0
+    fi
+}
+
+backup() {
+	debug_print_func
+
+    local -a idxs
+    local img="$(PRM image)" cnt=$(PRM backups) i= tmp=
+
+	debug_print_func "image: '$img'" "backups: $cnt"
+
+    idxs=($( shopt -qs extglob;
+             eval 'ls -1 "$img".+([0-9]) 2>/dev/null' | cut -c $((${#img}+2))- | sort -n ))
+
+    # delete unneeded backup files
+    for ((i=${#idxs[@]}-1; i>cnt-2; i--)); do
+        tmp=$(rm "$img.${idxs[i]}" 2>&1) || eerror "$tmp"
+    done
+
+    # rename rest of them
+    local j=cnt-2; ((j>=${#idxs[@]})) && ((j=${#idxs[@]}-1))
+    for ((i=j; i>=0; i--)); do
+        tmp=$(mv "$img.${idxs[i]}" "$img.$((idxs[i]+1))" 2>&1) || eerror "$tmp"
+    done
+
+    ((cnt==0)) && \
+        { tmp=$(rm "$img" 2>&1) || eerror "$tmp"; } || \
+        { tmp=$(mv "$img" "$img.1" 2>&1) || eerror "$tmp"; }
+}
+
+rw_enabled() {
+	yesno $(PRM can_rw) && ! yesno $(PRM force_ro)
+}
+
+
+# mountpoint [fs]
+is_mounted() {
+	debug_print_func "$@"
+	local fs
+	if fs=$(awk -v d="$1" 'BEGIN{e=1} {if(d==$2){e=0;print $3}} END{exit e}' /proc/mounts); then
+		[[ -z $2 || $fs == $2 ]] && return 0
+	fi
+	return 1
+}
+
+# phases: none -> ro -> rw
+do_mount() {
+	debug_print_func
+
+	save_prm active_since $(date +%s)
+
+	if [[ $(PRM phase) == 'none' ]]; then
+		do_mount_ro || return 1
+		save_prm phase 'ro'
+	fi
+
+	if rw_enabled; then
+		if [[ $(PRM phase) == 'ro' ]]; then
+			do_mount_rw || { do_umount_ro; return 1; }
+			save_prm phase 'rw'
+		fi
+	else
+		yesno $(PRM can_rw) && yesno $(PRM force_ro) && einfo "Forced read-only mode, see ${V_PRFX}_FORCE_RO"
+	fi
+	return 0
+}
+
+# phases: rw -> ro -> none
+do_umount() {
+	debug_print_func
+
+	if [[ $(PRM phase) == 'rw' ]]; then
+		do_umount_rw || return 1
+		save_prm phase 'ro'
+	fi
+	if [[ $(PRM phase) == 'ro' ]]; then
+		do_umount_ro || return 1
+		save_prm phase 'none'
+	fi
+	return 0
+}
+
+do_mount_ro() {
+	debug_print_func
+
+	local msg= mnt="$(PRM mount)" img="$(PRM image)"
+
+	[[ -e "$img" ]] || { eerror "Image not found: $img. Consider use 'build' command first"; return 1; }
+	has_files "$mnt/*" && { eerror "Mount point $mnt is not empty"; return 1; }
+
+	einfo 'Mounting squashfs...'
+	rw_enabled && mnt=$RO_DIR
+
+	if [[ ! -d "$mnt" ]]; then
+		mkdir -p "$mnt" || { eerror "Failed to create directory: $mnt"; return 1; }
+	fi
+
+	save_prm mount_ro "$mnt"
+
+	msg=$(mount -rt squashfs -o loop,nodev,noexec,nosuid "$img" "$mnt" 2>&1) && return 0
+	print_msg "$msg" 'e!'
+	return 1
+}
+
+do_umount_ro() {
+	debug_print_func
+
+	local msg= mntro="$(PRM mount_ro)"
+	is_mounted $mntro squashfs || { eerror 'squashfs SUDDENLY not mounted!'; return 1; }
+
+	einfo 'Unmounting squashfs...'
+	if msg=$(umount -f -l -t squashfs "$mntro" 2>&1); then
+		rw_enabled && rm -rd "$mntro"
+		return 0
+	else
+		print_msg "$msg" 'e!'
+		return 1
+	fi
+}
+
+do_mount_rw() {
+	debug_print_func
+
+	local msg
+	mkdir -p $UPPER_DIR || { eerror "Failed to create directory: $UPPER_DIR"; return 1; }
+	mkdir -p $WORK_DIR || { eerror "Failed to create directory: $WORK_DIR"; return 1; }
+
+	einfo 'Mounting overlayfs...'
+	msg=$(mount -t overlay -o lowerdir="$(PRM mount_ro)",upperdir=$UPPER_DIR,workdir=$WORK_DIR overlay "$(PRM mount)" 2>&1) && return 0
+	print_msg "$msg" 'e!'
+	return 1
+}
+
+do_umount_rw() {
+	debug_print_func
+
+	local msg mnt="$(PRM mount)"
+	is_mounted $mnt overlay || { eerror 'overlayfs SUDDENLY not mounted!'; return 1; }
+
+	einfo 'Unmounting overlayfs...'
+	if msg=$(umount -f -l -t overlay "$mnt" 2>&1); then
+		rm -rd $OFVS_DIR
+		return 0
+	else
+		print_msg "$msg" 'e!'
+		return 1
+	fi
+}
+
+# $1 - action, $n - parameters
+open_files_action() {
+	debug_print_func " $@"
+
+    local mnt="$(PRM mount)" tmp=
+    case "$1" in
+        check)
+            if [[ $(PRM ofh) == 'fuser' ]]; then
+                tmp="$(fuser -m "$mnt" -v 2>&1)" || return 1
+                tmp="$(echo -e "$tmp" | grep -Ev 'kernel.*mount' | grep -Eo '[^ ].*')"
+            else
+                tmp="$(lsof -w -X +D $mnt)"
+                echo -e "$tmp" | grep -Eq 'COMMAND.*PID.*USER' || return 1
+            fi
+            (( $(echo -e "$tmp" | wc -l)>1 )) || return 1
+            echo -e "$tmp"
+            return 0
+            ;;
+
+        kill) # $2 - signal
+            if [[ $(PRM ofh) == 'fuser' ]]; then
+                fuser -m "$mnt" -k -${2}
+            else
+                local tmp=$(lsof -t -w -X +D "$mnt")
+                [[ -n "$tmp" ]] && kill -s ${2} $tmp
+            fi
+            ;;
+    esac
+}
+
+open_files_handler() {
+	debug_print_func
+
+    local msg= ts=
+
+    [[ $(PRM phase) == 'rw' ]] || return 0
+
+    if msg=$(open_files_action check); then
+        if [[ $RC_RUNLEVEL == 'shutdown' ]]; then
+            local ts=$(PRM wait_close)
+            if (( ts>0 )); then
+                ebegin "some files are open, waiting ${ts} sec"
+                (( ts=$(date +%s)+ts ))
+                while (( $(date +%s)<ts )); do
+                    sleep $OF_CHECK_INTERVAL
+                    open_files_action check >/dev/null || { eend 0; return 0; }
+                done
+                eend 1
+            fi
+            ebegin 'files are still open, killing owners with SIGINT'
+            open_files_action kill 'INT'
+            sleep $OF_CHECK_INTERVAL
+            open_files_action check >/dev/null || { eend 0; return 0; }
+            eend 1
+
+            ebegin '...no problem, trying SIGTERM'
+            opened_files_action kill 'TERM'
+            sleep $OF_CHECK_INTERVAL
+            open_files_action check >/dev/null || { eend 0; return 0; }
+            eend 1
+
+            ebegin '...SIGKILL is the only way'
+            open_files_action kill 'KILL'
+            sleep 1
+            opened_files_action check >/dev/null || { eend 0; return 0; }
+            eend 1 "OHSHI! They're invincible!"
+            return 0
+        else
+            eerror 'aborting, some files are open:'
+            print_msg "$msg" 'w!    '
+            return 1
+        fi
+    else
+        return 0
+    fi
+}
+
+###
+
+force_dirty() {
+	save_prm force_changed 'on'
+}
+
+force_clean() {
+	save_prm force_changed 'off'
+}
+
+start_checks() {
+	debug_print_func
+	local res=0
+	check_standalone || res=1
+	check_binaries || res=1
+	other_system_checks || res=1
+	check_compressor || res=1
+	check_vars || res=1
+	print_msg
+	return $res
+}
+
+build_checks() {
+	debug_print_func
+
+	local res=0
+	local img="$(PRM image)" mnt="$(PRM mount)"
+
+	[[ -a "$img" ]] && { MSG+=("e!Image file $img is already exists"); res=1; }
+	has_files "$img.+([0-9])" && { MSG+=("e!Found image backup file(s): $img.*"); res=1; }
+
+	[[ -d "$mnt" ]] || { MSG+=("e!Source directory $mnt not exists or not a directory"); res=1; }
+
+	is_mounted "$mnt" && { MSG+=("e!$mnt is already mounted"); res=1; }
+	# mount | grep -Es 'on $mnt(/[^[:blank:]]+|)' && { MSG+=("e!$mnt or something deeper is already mounted"); res=1; }
+	return $res
+}
+
+build() {
+	local res=0
+	start_checks || res=1
+	build_checks || res=1
+	print_msg
+	[[ $res -eq 0 ]] || return $res
+
+	einfo "Building $SVC image: $(PRM image) of $(PRM mount)..."
+	local mnt=$(PRM mount)
+	has_files "$mnt/*" || ewarn "Source directory $mnt is empty, you're building an empty image!"
+
+	if rebuild_image build; then
+        einfo "... now you can remove source directory content: 'rm -rf $mnt/*'"
+        einfo "... (warning! DO NOT remove source directory itself!)"
+        einfo "... and mount image using 'start' command"
+		return 0
+	else
+		return 1
+	fi
+}
+
+start() {
+	start_checks || { print_msg; return 1; }
+
+	save_prm phase 'none'
+	einfo "Starting $SVC ($(PRM image) on $(PRM mount))..."
+	do_mount
+}
+
+stop() {
+	local res=0
+	check_binaries || res=1
+	check_compressor || res=1
+	print_msg
+	[[ $res -eq 0 ]] || return $res
+
+	if open_files_handler; then
+		rebuild_image
+		einfo "Stopping $SVC ($(PRM image) on $(PRM mount)) [$(PRM phase)]..."
+		do_umount
+	else
+		return 1
+	fi
+}
+
+xrestart() {
+	einfo "Restarting $SVC ($(PRM image) on $(PRM mount)) [$(PRM phase)]..."
+    if is_dirty_or_forced; then
+        stop && start
+    else
+        einfo 'No restart needed'
+        return 0
+    fi
+}
+
+xstatus() {
+	local rw=0 tmp=
+
+	if service_started; then
+		[[ $(PRM phase) == 'rw' ]] && rw=1
+
+		einfo     "Image             : $(PRM image)"
+		einfo     "Mounted           : $(PRM mount) [$(PRM phase)]"
+		einfo     "Since             : $(date -d @$(PRM active_since))"
+		tmp=$(unsquashfs -s $(PRM image))
+        print_msg "$tmp" '    '
+		einfo     "Overlay supported : $(PRM can_rw)"
+		einfo     "Overlay disabled  : $(PRM force_ro)"
+		if ((rw)); then
+			einfo "Overlay dirs      : [ro]    $RO_DIR"
+			einfo "                  : [work]  $WORK_DIR"
+			einfo "                  : [upper] $UPPER_DIR"
+			tmp=$(is_dirty && echo yes || echo no)
+			[[ $(PRM force_changed) == 'on' ]] && tmp="$tmp (forced: on)"
+			[[ $(PRM force_changed) == 'off' ]] && tmp="$tmp (forced: off)"
+			einfo "Dirty (changed)   : $tmp"
+		fi
+		if tmp=$(open_files_action check); then
+			einfo "Files are open    :"
+            print_msg "$tmp" '    '
+		else
+			einfo "Files are open    : no"
+		fi
+	fi
+	einfo         "-------------------"
+	status
+}

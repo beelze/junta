@@ -1,0 +1,37 @@
+# mandatory mountpoint; should be set only in aliased configs
+UBERFS_MOUNT=/usr/portage/gentoo
+
+# /absolute/path/to/squashed.image
+# default: ${UBERFS_MOUNT}.sqfs
+#UBERFS_IMAGE=
+
+# -comp option for mksquashfs: gzip|lzo|xz (see USE flags for squashfs-tools). default: first available compressor
+UBERFS_COMPRESSION=lzo
+
+# "yes" – use default (first available) mksquashfs compressor if UBERFS_COMPRESSION isn't available, fail otherwise
+UBERFS_USE_FALLBACK_COMPRESSION=yes
+
+# 'yes' to prefer lsof over fuser (lsof or fuser needed for print a list of opened files)
+UBERFS_PREFER_LSOF=
+
+# 'yes' to skip mounting overlayfs, mount only (ro) squashfs image
+UBERFS_FORCE_RO=
+
+# user:group syntax (chown), default portage:portage
+# UBERFS_OWNER=
+# chmod syntax, default 770
+# UBERFS_MODE=
+
+# backups count, default 1; 0 to disable backups
+UBERFS_BACKUP_CNT=3
+
+# seconds to wait before proceed opened files
+# if runlevel is shutdown, wait before terminate all owner processes, otherwise wait before aborting command
+# default: no wait, proceed immediately
+UBERFS_WAIT_FILES=5
+
+# additional mksquashfs options (see mksquashfs -h)
+# WARNING! Do not put here -force-[ug]id, -comp, -root-becomes options, use UBERFS_OWNER and UBERFS_COMPRESSION instead!
+UBERFS_MKSQFS_OPTS='-no-exports -no-xattrs -always-use-fragments -Xcompression-level 9'
+
+UBERFS_DEBUG=
