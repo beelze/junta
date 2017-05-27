@@ -16,7 +16,7 @@ KEYWORDS="~amd64 ~x86"
 
 declare -A FLAGS
 FLAGS=( [blacklist]="DWANT_ACCESSLIST_BLACK"
-    [gzip]="DWANT_COMPRESSION_GZIP$"
+    [gzip]="DWANT_COMPRESSION_GZIP"
     [gzip_always]="DWANT_COMPRESSION_GZIP_ALWAYS"
     [ip_from_query]="DWANT_IP_FROM_QUERY_STRING"
     [ip_from_proxy]="DWANT_IP_FROM_PROXY"
