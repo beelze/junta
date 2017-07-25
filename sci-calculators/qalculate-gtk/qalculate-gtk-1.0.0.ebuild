@@ -15,7 +15,7 @@ KEYWORDS="alpha amd64 hppa ppc sparc x86 ~amd64-linux ~x86-linux"
 IUSE="gnome"
 
 RDEPEND=">=sci-libs/libqalculate-1.0.0:=
-	x11-libs/gtk+:3.10"
+	>=x11-libs/gtk+-3.10:3"
 DEPEND="${RDEPEND}
 	app-text/rarian
 	sys-devel/gettext
