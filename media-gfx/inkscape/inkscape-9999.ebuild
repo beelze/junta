@@ -19,7 +19,7 @@ RESTRICT="test"
 
 COMMON_DEPEND="
 	>=dev-cpp/glibmm-2.36
-	dev-cpp/gtkmm:3.0
+	dev-cpp/gtkmm:2.4
 	>=dev-libs/boehm-gc-6.4
 	dev-libs/gdl
 	>=dev-libs/glib-2.6.5
@@ -33,8 +33,8 @@ COMMON_DEPEND="
 	media-libs/fontconfig
 	media-libs/freetype:2
 	media-libs/libpng:0
-	app-text/libwpd:0.9
-	wpg? ( app-text/libwpg:0.2 )
+	app-text/libwpd:0.10
+	wpg? ( app-text/libwpg:0.3 )
 	sci-libs/gsl
 	x11-libs/libXft
 	x11-libs/gtk+:2
