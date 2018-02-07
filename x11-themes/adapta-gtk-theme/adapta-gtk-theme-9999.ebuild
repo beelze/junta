@@ -23,7 +23,7 @@ fi
 
 LICENSE="GPL-2"
 SLOT="0"
-IUSE=""
+IUSE="gnome gtk318 gtk4 parallel cinnamon flashback xfce mate openbox chrome plank telegram"
 
 RDEPEND="
 	x11-libs/gtk+:2
@@ -33,12 +33,32 @@ RDEPEND="
 	dev-libs/libxml2:2
 "
 DEPEND="${RDEPEND}
-	sys-process/parallel
+	parallel? ( sys-process/parallel )
     dev-lang/sassc"
 
 src_prepare(){
 	eautoreconf
-	gnome2_src_prepare
+	if use gnome; then
+		gnome2_src_prepare
+	else
+		default
+	fi
+	# gnome2_src_prepare
+}
+
+src_configure() {
+	econf $(use_enable gnome) \
+		  $(use_enable parallel) \
+		  $(use_enable cinnamon) \
+		  $(use_enable flashback) \
+		  $(use_enable xfce) \
+		  $(use_enable mate) \
+		  $(use_enable openbox) \
+		  $(use_enable chrome) \
+		  $(use_enable plank) \
+		  $(use_enable telegram) \
+		  $(use_enable gtk318 gtk_legacy) \
+		  $(use_enable gtk4 gtk_next)
 }
 
 src_compile(){
