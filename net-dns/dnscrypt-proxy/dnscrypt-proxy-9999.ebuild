@@ -2,10 +2,13 @@
 # Distributed under the terms of the GNU General Public License v2
 # $Id$
 
-EAPI=5
+EAPI=6
 
-inherit autotools git-2 systemd user
-EGIT_REPO_URI="https://github.com/jedisct1/dnscrypt-proxy.git"
+inherit golang-build golang-vcs user
+
+#EGO_SRC=github.com/jedisct1/dnscrypt-proxy.git
+EGO_SRC=github.com/jedisct1/dnscrypt-proxy
+EGO_PN=${EGO_SRC}/...
 
 DESCRIPTION="A tool for securing communications between a client and a DNS resolver"
 HOMEPAGE="http://dnscrypt.org/"
@@ -24,24 +27,11 @@ RDEPEND="${CDEPEND}"
 DEPEND="${CDEPEND}
 	virtual/pkgconfig"
 
-DOCS="AUTHORS ChangeLog NEWS README* THANKS *txt"
-
-S="${WORKDIR}/${PN}-master"
+#DOCS="AUTHORS ChangeLog NEWS README* THANKS *txt"
 
 pkg_setup() {
 	enewgroup dnscrypt
 	enewuser dnscrypt -1 -1 /var/empty dnscrypt
-}
-
-
-src_prepare() {
-	eautoreconf
-}
-
-src_configure() {
-	econf \
-		$(use_enable plugins) \
-		$(use_with systemd)
 }
 
 src_install() {
