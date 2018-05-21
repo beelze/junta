@@ -8,7 +8,8 @@ inherit autotools eutils
 
 DESCRIPTION="In-place conversion of text typed in with a wrong keyboard layout (Punto Switcher replacement)"
 HOMEPAGE="http://www.xneur.ru/"
-SRC_URI="https://launchpad.net/~andrew-crew-kuznetsov/+archive/xneur-stable/+files/xneur_${PV}+git5.orig.tar.gz"
+#SRC_URI="https://github.com/AndrewCrewKuznetsov/${PN}-devel/raw/master/dists/${PV}/${PN}_${PV}.orig.tar.gz"
+SRC_URI="https://github.com/AndrewCrewKuznetsov/${PN}-devel/blob/master/dists/${PV}/${PN}_${PV}.orig.tar.gz?raw=true"
 
 LICENSE="GPL-2"
 SLOT="0"
