@@ -2,7 +2,7 @@
 # Distributed under the terms of the GNU General Public License v2
 # $Header: $
 
-EAPI=2
+EAPI=6
 
 inherit autotools eutils
 
@@ -51,6 +51,8 @@ src_prepare() {
 	# sed -i -e 's/@LDFLAGS@ //' xnconfig.pc.in || die
 	# epatch "${FILESDIR}/locale-h.patch"
 	eautoreconf
+	#
+	default
 }
 
 src_configure() {
