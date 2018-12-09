@@ -1,4 +1,4 @@
-# Copyright 1999-2017 Gentoo Foundation
+# Copyright 1999-2018 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=6
@@ -28,6 +28,7 @@ IUSE="alsa aspell debug enchant gstreamer keylogger libnotify nls openal xosd"
 DEPEND="
 	sys-libs/zlib
 	x11-libs/libXi
+	x11-libs/libXtst
 	gstreamer? ( media-libs/gstreamer:1.0 )
 	openal? ( media-libs/freealut )
 	>=dev-libs/libpcre-5.0
@@ -36,7 +37,6 @@ DEPEND="
 	xosd? ( x11-libs/xosd )
 	libnotify? (
 		>=x11-libs/libnotify-0.4.0
-		x11-libs/gtk+:2
 	)
 "
 RDEPEND="
@@ -73,7 +73,7 @@ src_prepare() {
 
 src_configure() {
 	local _snd _spl
-	_snd=$(usev gstreamer)$(usev openal)$(usev alsa)
+	_snd=$(usev gstreamer)$(usev openal)$(usex alsa aplay)
 	_snd=${_snd:-no}
 	_spl=$(usev aspell)$(usev enchant)
 	_spl=${_spl:-no}
@@ -81,8 +81,8 @@ src_configure() {
 	local myeconfargs=(
 		--with-sound=${_snd}
 		--with-spell=${_spl}
-		--with-gtk=$(usex libnotify gtk2)
 		$(use_with debug)
+		--with-x
 		$(use_enable nls)
 		$(use_with xosd)
 		$(use_with libnotify)
