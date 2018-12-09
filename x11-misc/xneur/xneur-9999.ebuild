@@ -24,8 +24,6 @@ HOMEPAGE="https://xneur.ru"
 LICENSE="GPL-2"
 SLOT="0"
 IUSE="alsa aspell debug enchant gstreamer keylogger libnotify nls openal xosd"
-# Временный костыль
-CFLAGS="$CFLAGS -Wno-error=unused-variable"
 
 DEPEND="
 	sys-libs/zlib
@@ -70,6 +68,8 @@ src_prepare() {
 		-i "${S}"/xn*.pc.in
 	[[ -n ${PV%%*9999} ]] && return
 	sed -e '/\<INSTALL\>/d' -i "${S}"/Makefile.am
+	# Временный костыль
+	sed -e '/^DEFAULT_CFLAGS=/s:-Werror::' -i "${S}"/configure.ac || die "sed failed"
 	eautoreconf
 }
 
