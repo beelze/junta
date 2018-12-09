@@ -24,6 +24,8 @@ HOMEPAGE="https://xneur.ru"
 LICENSE="GPL-2"
 SLOT="0"
 IUSE="alsa aspell debug enchant gstreamer keylogger libnotify nls openal xosd"
+# Временный костыль
+CFLAGS="$CFLAGS -Wno-error=unused-variable"
 
 DEPEND="
 	sys-libs/zlib
