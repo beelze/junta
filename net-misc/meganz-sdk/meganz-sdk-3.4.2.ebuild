@@ -8,23 +8,24 @@ if [[ -z ${PV%%*9999} ]]; then
 	inherit git-r3
 	EGIT_REPO_URI="https://github.com/${PN%-*}/${PN#*-}.git"
 else
-	inherit vcs-snapshot
-	MY_PV="f3a3b81"
-	[[ -n ${PV%%*_p*} ]] && MY_PV="v${PV}"
-	SRC_URI="
-		mirror://githubcl/${PN%-*}/${PN#*-}/tar.gz/${MY_PV}
-		-> ${P}.tar.gz
-	"
-	RESTRICT="primaryuri"
-	KEYWORDS="~amd64 ~x86"
+	# inherit vcs-snapshot
+	# MY_PV="0fbbaa4"
+	# [[ -n ${PV%%*_p*} ]] && MY_PV="v${PV}"
+	# SRC_URI="
+	# 	mirror://githubcl/${PN%-*}/${PN#*-}/tar.gz/${MY_PV}
+	# 	-> ${P}.tar.gz
+	# "
+	# RESTRICT="primaryuri"
+    # KEYWORDS="~amd64 ~x86"
+    SRC_URI="https://github.com/meganz/sdk/archive/v${PV}.tar.gz -> ${P}.tar.gz"
 fi
 
+SLOT=0
 DESCRIPTION="MEGA C++ SDK"
 HOMEPAGE="https://github.com/meganz/sdk"
 
 LICENSE="BSD-2"
 # awk '/define/ {print $3}' include/mega/version.h|awk 'BEGIN{RS="";FS="\n"}{printf $1*10000+$2*100+$3}'
-SLOT="0/30404"
 IUSE="examples ffmpeg freeimage fuse hardened inotify libuv mediainfo qt raw +sqlite"
 REQUIRED_USE="
 	examples? ( sqlite )
@@ -57,6 +58,11 @@ RDEPEND="
 
 pkg_setup() {
 	use sqlite || append-cppflags "-I$(db_includedir)"
+}
+
+src_unpack() {
+    default
+    mv ${WORKDIR}/sdk-${PV} $S || die "${WORKDIR}/sdk-${PV} not renamed!"
 }
 
 src_prepare() {
