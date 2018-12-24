@@ -10,6 +10,7 @@ EGIT_SUBMODULES=( )
 if [[ -z ${PV%%*9999} ]]; then
     :
 else
+    KEYWORDS="~amd64 ~x86"
     EGIT_COMMIT=$PV
 fi
 
