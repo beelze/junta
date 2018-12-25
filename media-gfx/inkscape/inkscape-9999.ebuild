@@ -28,7 +28,7 @@ COMMON_DEPEND="
 	>=dev-libs/libxslt-1.0.15
 	dev-libs/popt
 	dev-python/lxml
-	=media-gfx/imagemagick-6.9*[cxx]
+	|| ( media-gfx/imagemagick[cxx] media-gfx/graphicsmagick[cxx,symlink] )
 	media-gfx/potrace
 	media-libs/fontconfig
 	media-libs/freetype:2
@@ -39,7 +39,7 @@ COMMON_DEPEND="
 	x11-libs/libXft
 	x11-libs/gtk+:2
 	>=x11-libs/pango-1.4.0
-	|| ( dev-lang/python:2.7[xml] dev-python/pyxml )
+	dev-lang/python:2.7[xml]
 	gnome? ( >=gnome-base/gnome-vfs-2.0 )
 	lcms? ( media-libs/lcms:2 )"
 
