@@ -2,12 +2,10 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=5
-inherit bzr gnome2 cmake-utils flag-o-matic
+inherit git-r3 gnome2 cmake-utils flag-o-matic
 
 SRC_URI=""
-EBZR_REPO_URI="lp:inkscape"
-EBZR_PROJECT="inkscape"
-
+EGIT_REPO_URI="https://gitlab.com/inkscape/inkscape.git"
 DESCRIPTION="A SVG based generic vector-drawing program"
 HOMEPAGE="http://www.inkscape.org/"
 
@@ -61,15 +59,15 @@ DEPEND="${COMMON_DEPEND}
 	x11-libs/libX11
 	>=dev-util/intltool-0.29"
 
-src_unpack() {
-	bzr_src_unpack
-}
+# src_unpack() {
+# 	bzr_src_unpack
+# }
 
-src_prepare() {
-	# prevent writing into the real tree
-	einfo "Fixing gtk-update-icon-cache path"
-	sed -i "/gtk-update-icon-cache -f -t /d" "${S}"/share/icons/application/CMakeLists.txt || die "Failed to update gtk-update-icon-cache path"
-}
+# src_prepare() {
+# 	# prevent writing into the real tree
+# 	einfo "Fixing gtk-update-icon-cache path"
+# 	sed -i "/gtk-update-icon-cache -f -t /d" "${S}"/share/icons/application/CMakeLists.txt || die "Failed to update gtk-update-icon-cache path"
+# }
 
 src_configure(){
 	local mycmakeargs=(
