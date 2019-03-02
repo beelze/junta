@@ -19,7 +19,7 @@ RESTRICT="test"
 
 COMMON_DEPEND="
 	>=dev-cpp/glibmm-2.36
-	dev-cpp/gtkmm:2.4
+	dev-cpp/gtkmm:3.0
 	>=dev-libs/boehm-gc-6.4
 	dev-libs/gdl
 	>=dev-libs/glib-2.6.5
@@ -28,7 +28,7 @@ COMMON_DEPEND="
 	>=dev-libs/libxslt-1.0.15
 	dev-libs/popt
 	dev-python/lxml
-	=media-gfx/imagemagick-6.9*[cxx]
+	=media-gfx/imagemagick-7.0*[cxx]
 	media-gfx/potrace
 	media-libs/fontconfig
 	media-libs/freetype:2
