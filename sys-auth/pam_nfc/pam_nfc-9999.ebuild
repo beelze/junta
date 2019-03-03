@@ -33,6 +33,10 @@ src_compile() {
 	MAKEOPTS="-j1" emake
 }
 
+src_compile() {
+	MAKEOPTS="-j1" emake
+}
+
 src_install() {
 	default
 	use static-libs || find "${ED}" -name '*.la' -delete
