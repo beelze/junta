@@ -6,7 +6,7 @@ EAPI=6
 # 1.15 because of bug#33022: Generated Makefile builds PROGRAMS before LTLIBRARIES
 WANT_AUTOMAKE=1.15
 
-inherit git-r3 autotools
+inherit git-r3 autotools pam
 
 DESCRIPTION="NFC-based PAM authentification module"
 HOMEPAGE="https://github.com/nfc-tools/pam_nfc http://nfc-tools.org/index.php?title=Pam_nfc"
@@ -20,8 +20,17 @@ IUSE="static-libs"
 DEPEND=">=dev-libs/libnfc-1.7.0"
 
 src_prepare() {
-	eautoreconf
 	default
+	eautoreconf
+}
+
+src_configure() {
+	econf \
+		"--with-pam-dir=$(getpam_mod_dir)"
+}
+
+src_compile() {
+	MAKEOPTS="-j1" emake
 }
 
 src_install() {
