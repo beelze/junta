@@ -5,7 +5,7 @@
  if(bs)
    {
 -  if(bs<32 || bs>4096 || cnt_bits(bs)!=1)
-+  if(bs<32 || bs>16384 || cnt_bits(bs)!=1)
++  if(bs<32 || bs>65536 || cnt_bits(bs)!=1)
      {
      printf("mktorrent: Wrong piece size specified\n");
      return 1;
