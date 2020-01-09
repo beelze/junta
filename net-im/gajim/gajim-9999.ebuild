@@ -1,70 +1,87 @@
-# Copyright 1999-2017 Gentoo Foundation
+# Copyright 1999-2020 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI=6
-EGIT_REPO_URI="https://dev.gajim.org/gajim/gajim.git"
+EAPI=7
 
-PYTHON_COMPAT=( python3_{5,6} )
+PYTHON_COMPAT=( python3_{6,7} )
 PYTHON_REQ_USE="sqlite,xml"
+DISTUTILS_SINGLE_IMPL=1
 
-inherit git-r3 distutils-r1
+inherit distutils-r1 xdg-utils git-r3
 
 DESCRIPTION="Jabber client written in PyGTK"
-HOMEPAGE="http://www.gajim.org/"
+HOMEPAGE="https://www.gajim.org/"
+SRC_URI="https://www.gajim.org/downloads/$(ver_cut 1-2)/${P}.tar.bz2"
+EGIT_REPO_URI="https://dev.gajim.org/gajim/gajim.git"
 
 LICENSE="GPL-3"
 SLOT="0"
-IUSE="crypt dbus gnome idle jingle networkmanager nls spell +srv test X xhtml zeroconf"
-
-REQUIRED_USE="
-	${PYTHON_REQUIRED_USE}
-	zeroconf? ( dbus )"
+#KEYWORDS="~amd64 ~arm ~ppc ~ppc64 ~x86"
+KEYWORDS="~amd64 ~x86"
+IUSE="+crypt geolocation jingle networkmanager remote rst +spell upnp
+	+webp"
 
 COMMON_DEPEND="
-	${PYTHON_DEPS}
-	x11-libs/gtk+:3"
+	dev-libs/gobject-introspection[cairo]
+	>=x11-libs/gtk+-3.27:3[introspection]"
 DEPEND="${COMMON_DEPEND}
+	app-arch/unzip
 	>=dev-util/intltool-0.40.1
 	virtual/pkgconfig
 	>=sys-devel/gettext-0.17-r1"
 RDEPEND="${COMMON_DEPEND}
-	dev-python/pygobject:3[${PYTHON_USEDEP}]
-	dev-python/protobuf-python[${PYTHON_USEDEP}]
-	dev-python/pycrypto[${PYTHON_USEDEP}]
-	dev-python/cryptography[${PYTHON_USEDEP}]
-	dev-python/pillow[${PYTHON_USEDEP}]
-	dev-python/pycurl[${PYTHON_USEDEP}]
-	dev-python/qrcode[${PYTHON_USEDEP}]
+	dev-python/idna[${PYTHON_USEDEP}]
+	dev-python/precis-i18n[${PYTHON_USEDEP}]
 	dev-python/pyasn1[${PYTHON_USEDEP}]
+	dev-python/pycairo[${PYTHON_USEDEP}]
+	dev-python/pycurl[${PYTHON_USEDEP}]
+	dev-python/pygobject[cairo,${PYTHON_USEDEP}]
 	>=dev-python/pyopenssl-0.14[${PYTHON_USEDEP}]
-	>=dev-python/python-nbxmpp-0.5.3[${PYTHON_USEDEP}]
+	>=dev-python/python-nbxmpp-0.6.9[${PYTHON_USEDEP}]
+	x11-libs/libXScrnSaver
+	app-crypt/libsecret[crypt,introspection]
+	dev-python/keyring[${PYTHON_USEDEP}]
+	>=dev-python/secretstorage-3.1.1[${PYTHON_USEDEP}]
+	>=dev-python/cssutils-1.0.2[${PYTHON_USEDEP}]
 	crypt? (
-		app-crypt/gnupg
-		dev-python/python-gnupg[${PYTHON_USEDEP}]
-		)
-	dbus? (
-		dev-python/dbus-python[${PYTHON_USEDEP}]
-		virtual/notification-daemon
-		dev-libs/dbus-glib
-		zeroconf? ( net-dns/avahi[dbus,gtk,python,${PYTHON_USEDEP}] )
-		)
-	gnome? (
-		dev-python/libgnome-python[${PYTHON_USEDEP}]
-		dev-python/egg-python[${PYTHON_USEDEP}]
-		)
-	idle? ( x11-libs/libXScrnSaver )
-	jingle? ( net-libs/farstream:0.2[python,${PYTHON_USEDEP}] )
-	networkmanager? (
-			dev-python/dbus-python[${PYTHON_USEDEP}]
-			net-misc/networkmanager
-		)
-	spell? ( app-text/gtkspell:2 )
-	srv? (
-		|| (
-			dev-python/libasyncns-python[${PYTHON_USEDEP}]
-			net-dns/bind-tools
-			)
-		)
-	xhtml? ( dev-python/docutils[${PYTHON_USEDEP}] )"
+		dev-python/pycryptodome[${PYTHON_USEDEP}]
+		>=dev-python/python-gnupg-0.4.0[${PYTHON_USEDEP}] )
+	geolocation? ( app-misc/geoclue[introspection] )
+	jingle? (
+		net-libs/farstream:0.2[introspection]
+		media-libs/gstreamer:1.0[introspection]
+		media-libs/gst-plugins-base:1.0[introspection]
+		media-libs/gst-plugins-ugly:1.0
+	)
+	networkmanager? ( net-misc/networkmanager[introspection] )
+	remote? (
+		>=dev-python/dbus-python-1.2.0[${PYTHON_USEDEP}]
+		sys-apps/dbus[X]
+	)
+	rst? ( dev-python/docutils[${PYTHON_USEDEP}] )
+	spell? (
+		app-text/gspell[introspection]
+		app-text/hunspell
+	)
+	upnp? ( net-libs/gupnp-igd[introspection] )
+	webp? ( dev-python/pillow[${PYTHON_USEDEP}] )"
 
 RESTRICT="test"
+
+src_install() {
+	distutils-r1_src_install
+
+	# avoid precompressed man pages
+	rm -r "${D}/usr/share/man"
+	doman data/*.1
+}
+
+pkg_postinst() {
+	xdg_icon_cache_update
+	xdg_desktop_database_update
+}
+
+pkg_postrm() {
+	xdg_icon_cache_update
+	xdg_desktop_database_update
+}
