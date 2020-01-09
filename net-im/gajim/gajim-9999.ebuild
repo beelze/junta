@@ -23,7 +23,7 @@ IUSE="+crypt geolocation jingle networkmanager remote rst +spell upnp
 
 COMMON_DEPEND="
 	dev-libs/gobject-introspection[cairo]
-	>=x11-libs/gtk+-3.27:3[introspection]"
+	>=x11-libs/gtk+-3.22.27:3[introspection]"
 DEPEND="${COMMON_DEPEND}
 	app-arch/unzip
 	>=dev-util/intltool-0.40.1
