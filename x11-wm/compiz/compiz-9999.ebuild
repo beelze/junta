@@ -3,7 +3,7 @@
 
 EAPI=5
 
-inherit autotools eutils git-2 gnome2-utils
+inherit autotools eutils git-r3 gnome2-utils
 
 DESCRIPTION="OpenGL window and compositing manager"
 HOMEPAGE="https://github.com/compiz-reloaded"
@@ -70,10 +70,6 @@ RDEPEND="${COMMONDEPEND}
 
 #DOCS=( ABOUT-NLS AUTHORS COPYING* INSTALL NEWS TODO )
 DOCS=( ABOUT-NLS AUTHORS INSTALL NEWS TODO )
-
-src_unpack() {
-	git-2_src_unpack
-}
 
 src_prepare() {
 	echo gtk/gnome/compiz-wm.desktop.in >> po/POTFILES.skip
