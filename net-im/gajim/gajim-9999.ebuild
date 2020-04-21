@@ -3,7 +3,7 @@
 
 EAPI=7
 
-PYTHON_COMPAT=( python3_{6,7} )
+PYTHON_COMPAT=( python3_7 )
 PYTHON_REQ_USE="sqlite,xml"
 DISTUTILS_SINGLE_IMPL=1
 
@@ -21,6 +21,7 @@ KEYWORDS="~amd64 ~x86"
 IUSE="+crypt geolocation jingle networkmanager remote rst +spell upnp
 	+webp"
 
+DISTUTILS_USE_SETUPTOOLS=bdepend
 COMMON_DEPEND="
 	dev-libs/gobject-introspection[cairo]
 	>=x11-libs/gtk+-3.22.27:3[introspection]"
