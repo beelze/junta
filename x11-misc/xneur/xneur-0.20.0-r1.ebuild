@@ -3,7 +3,7 @@
 
 EAPI=7
 
-inherit autotools
+inherit autotools xdg-utils
 
 DESCRIPTION="In-place conversion of text typed in with a wrong keyboard layout"
 HOMEPAGE="http://www.xneur.ru/"
@@ -29,7 +29,7 @@ COMMON_DEPEND=">=dev-libs/libpcre-5.0
 			gtk3? ( x11-libs/gtk+:3 )
 			!gtk3? ( x11-libs/gtk+:2 ) )
 		>=x11-libs/libnotify-0.4.0 )
-	spell? ( app-text/enchant )
+	spell? ( app-text/enchant:2 )
 	xosd? ( x11-libs/xosd )"
 RDEPEND="${COMMON_DEPEND}
 	gstreamer? ( media-libs/gst-plugins-good
@@ -42,6 +42,11 @@ DEPEND="${COMMON_DEPEND}
 	nls? ( sys-devel/gettext )"
 
 REQUIRED_USE="libnotify? ( gtk )"
+
+PATCHES=(
+    "${FILESDIR}"/gcc-10.patch
+    "${FILESDIR}"/enchant2.patch
+)
 
 src_prepare() {
 	default
@@ -100,4 +105,6 @@ pkg_postinst() {
 
 	ewarn
 	ewarn "Note: if xneur became slow, try to comment out AddBind options in config file."
+
+	xdg_icon_cache_update
 }
