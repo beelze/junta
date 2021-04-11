@@ -3,7 +3,7 @@
 
 EAPI=7
 
-PYTHON_COMPAT=( python3_7 )
+PYTHON_COMPAT=( python3_8 )
 PYTHON_REQ_USE="sqlite,xml"
 DISTUTILS_SINGLE_IMPL=1
 
@@ -23,7 +23,7 @@ IUSE="+crypt geolocation jingle networkmanager remote rst +spell upnp
 
 DISTUTILS_USE_SETUPTOOLS=bdepend
 COMMON_DEPEND="
-	dev-libs/gobject-introspection[cairo]
+	dev-libs/gobject-introspection
 	>=x11-libs/gtk+-3.22.27:3[introspection]"
 DEPEND="${COMMON_DEPEND}
 	app-arch/unzip

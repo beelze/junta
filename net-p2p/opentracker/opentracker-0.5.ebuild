@@ -3,8 +3,6 @@
 
 EAPI=7
 
-EGIT_REPO_URI="https://github.com/flygoast/${PN}.git"
-
 MY_P="unofficial-v${PV}"
 
 declare -A FLAGS
@@ -28,15 +26,15 @@ FLAGS=( [blacklist]="DWANT_ACCESSLIST_BLACK"
 	[httpdebug]="DWANT_HTTPHUMAN"
 )
 
-inherit git-r3 systemd
+inherit systemd
 
 DESCRIPTION="High-performance bittorrent tracker"
 HOMEPAGE="https://github.com/flygoast/opentracker http://erdgeist.org/arts/software/opentracker/"
-SRC_URI=""
+SRC_URI="https://github.com/flygoast/opentracker/archive/${MY_P}.tar.gz"
 
 LICENSE="BEER-WARE"
 SLOT="0"
-KEYWORDS=""
+KEYWORDS="~amd64 ~x86"
 IUSE="blacklist debug +gzip gzip-always httpdebug ip-from-query ip-from-proxy ipv6 +fullscrapes fullscrapes-modest live-sync live-sync-unicast log-networks-full log-numwant persistence restrict-stats spot-woodpeckers syslog whitelist"
 REQUIRED_USE="blacklist? ( !whitelist )
 	gzip-always? ( gzip )
@@ -47,6 +45,8 @@ REQUIRED_USE="blacklist? ( !whitelist )
 RDEPEND="acct-user/opentracker
 	dev-libs/libowfat
 	gzip? ( sys-libs/zlib )"
+
+S="${WORKDIR}/${PN}-${MY_P}"
 
 src_prepare() {
 	default
@@ -91,7 +91,7 @@ src_prepare() {
 		-e "/tracker.rootdir/s|/usr/local/etc/opentracker|/var/lib/${PN}|g" \
 		-e "/tracker.user/s|nobody|${PN}|g" \
 		-e "/persist.file/s|/path/to/persist.odb|/var/lib/${PN}/${PN}.odb|g" \
-		opentracker.conf.sample || die "sed for config failed"
+	opentracker.conf.sample || die "sed for config failed"
 }
 
 src_install() {
