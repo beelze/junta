@@ -70,24 +70,24 @@ DEPEND="${COMMON_DEPEND}
 # }
 
 src_configure(){
-	local mycmakeargs=(
-		$(cmake-utils_use_with perl PERL)
-		$(cmake-utils_use_with python PYTHON)
-		$(cmake-utils_use_has poppler POPPLER_CAIRO)
-		$(cmake-utils_use_with gnome GNOME_VFS)
-		$(cmake-utils_use_with wpg LIBWPG)
-		$(cmake-utils_use_with dbus DBUS)
-		$(cmake-utils_use_has lcms LIBLCMS2)
-		$(cmake-utils_use_enable nls NLS)
-	)
-	cmake-utils_src_configure
+    local mycmakeargs=(
+	-DWITH_PERL=$(usex perl)
+	-DWITH_PYTHON=$(usex python)
+	-DWITH_POPPLER_CAIRO=$(usex poppler)
+	-DWITH_POPPLER_GNOME_VFS=$(usex gnome)
+	-DWITH_LIBWPG=$(usex wpg)
+	-DWITH_DBUS=$(usex dbus)
+	-DWITH_LIBLCMS2=$(usex lcms)
+	-DWITH_NLS=$(usex nls)
+    )
+    cmake-utils_src_configure
 
-	DOCS="AUTHORS ChangeLog* NEWS README*"
+    DOCS="AUTHORS ChangeLog* NEWS README*"
 
-	#./configure
-	# aliasing unsafe wrt #310393
-	#append-flags -fno-strict-aliasing
-	#gnome2_src_configure
+    #./configure
+    # aliasing unsafe wrt #310393
+    #append-flags -fno-strict-aliasing
+    #gnome2_src_configure
 }
 
 pkg_postinst() {
