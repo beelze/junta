@@ -20,3 +20,17 @@ RDEPEND="
 	net-libs/tdlib
 "
 DEPEND="${RDEPEND}"
+
+src_prepare() {
+    cmake_src_prepare
+}
+
+src_configure() {
+    local mycmakeargs=( -DNoVoip=True )
+    cmake_src_configure
+}
+
+src_compile() {
+    # emake -DNoVoip=True
+    cmake_src_compile
+}
