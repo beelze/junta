@@ -1,9 +1,9 @@
-# Copyright 1999-2020 Gentoo Authors
+# Copyright 1999-2022 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=7
 
-PYTHON_COMPAT=( python3_8 )
+PYTHON_COMPAT=( python3_{7,8,9} )
 PYTHON_REQ_USE="sqlite,xml"
 DISTUTILS_SINGLE_IMPL=1
 
@@ -11,15 +11,12 @@ inherit distutils-r1 xdg-utils git-r3
 
 DESCRIPTION="Jabber client written in PyGTK"
 HOMEPAGE="https://www.gajim.org/"
-SRC_URI="https://www.gajim.org/downloads/$(ver_cut 1-2)/${P}.tar.bz2"
 EGIT_REPO_URI="https://dev.gajim.org/gajim/gajim.git"
 
 LICENSE="GPL-3"
 SLOT="0"
-#KEYWORDS="~amd64 ~arm ~ppc ~ppc64 ~x86"
-KEYWORDS="~amd64 ~x86"
-IUSE="+crypt geolocation jingle networkmanager remote rst +spell upnp
-	+webp"
+KEYWORDS=""
+IUSE="+crypt geolocation jingle omemo remote rst +spell upnp +webp"
 
 DISTUTILS_USE_SETUPTOOLS=bdepend
 COMMON_DEPEND="
@@ -32,22 +29,22 @@ DEPEND="${COMMON_DEPEND}
 	>=sys-devel/gettext-0.17-r1"
 RDEPEND="${COMMON_DEPEND}
 	$(python_gen_cond_dep '
-	dev-python/idna[${PYTHON_MULTI_USEDEP}]
-	dev-python/precis-i18n[${PYTHON_MULTI_USEDEP}]
-	dev-python/pyasn1[${PYTHON_MULTI_USEDEP}]
-	dev-python/pycairo[${PYTHON_MULTI_USEDEP}]
-	dev-python/pycurl[${PYTHON_MULTI_USEDEP}]
-	dev-python/pygobject[cairo,${PYTHON_MULTI_USEDEP}]
-	>=dev-python/pyopenssl-0.14[${PYTHON_MULTI_USEDEP}]
-	>=dev-python/python-nbxmpp-0.6.9[${PYTHON_MULTI_USEDEP}]
+	dev-python/idna[${PYTHON_USEDEP}]
+	dev-python/precis-i18n[${PYTHON_USEDEP}]
+	dev-python/pyasn1[${PYTHON_USEDEP}]
+	dev-python/pycairo[${PYTHON_USEDEP}]
+	dev-python/pycurl[${PYTHON_USEDEP}]
+	dev-python/pygobject[cairo,${PYTHON_USEDEP}]
+	>=dev-python/pyopenssl-0.14[${PYTHON_USEDEP}]
+	>=dev-python/python-nbxmpp-0.6.9[${PYTHON_USEDEP}]
 	x11-libs/libXScrnSaver
 	app-crypt/libsecret[crypt,introspection]
-	dev-python/keyring[${PYTHON_MULTI_USEDEP}]
-	>=dev-python/secretstorage-3.1.1[${PYTHON_MULTI_USEDEP}]
-	>=dev-python/cssutils-1.0.2[${PYTHON_MULTI_USEDEP}]
+	dev-python/keyring[${PYTHON_USEDEP}]
+	>=dev-python/secretstorage-3.1.1[${PYTHON_USEDEP}]
+	>=dev-python/cssutils-1.0.2[${PYTHON_USEDEP}]
 	crypt? (
-		dev-python/pycryptodome[${PYTHON_MULTI_USEDEP}]
-		>=dev-python/python-gnupg-0.4.0[${PYTHON_MULTI_USEDEP}] )
+		dev-python/pycryptodome[${PYTHON_USEDEP}]
+		>=dev-python/python-gnupg-0.4.0[${PYTHON_USEDEP}] )
 	geolocation? ( app-misc/geoclue[introspection] )
 	jingle? (
 		net-libs/farstream:0.2[introspection]
@@ -55,20 +52,23 @@ RDEPEND="${COMMON_DEPEND}
 		media-libs/gst-plugins-base:1.0[introspection]
 		media-libs/gst-plugins-ugly:1.0
 	)
-	networkmanager? ( net-misc/networkmanager[introspection] )
+	omemo? (
+		dev-python/python-axolotl[${PYTHON_USEDEP}]
+		dev-python/qrcode[${PYTHON_USEDEP}]
+		dev-python/cryptography[${PYTHON_USEDEP}]
+	)
 	remote? (
-		>=dev-python/dbus-python-1.2.0[${PYTHON_MULTI_USEDEP}]
+		>=dev-python/dbus-python-1.2.0[${PYTHON_USEDEP}]
 		sys-apps/dbus[X]
 	)
-	rst? ( dev-python/docutils[${PYTHON_MULTI_USEDEP}] )
+	rst? ( dev-python/docutils[${PYTHON_USEDEP}] )
 	spell? (
 		app-text/gspell[introspection]
 		app-text/hunspell
 	)
 	upnp? ( net-libs/gupnp-igd[introspection] )
-	webp? ( dev-python/pillow[${PYTHON_MULTI_USEDEP}] )
+	webp? ( dev-python/pillow[${PYTHON_USEDEP}] )
 	')"
-
 
 RESTRICT="test"
 
