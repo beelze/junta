@@ -11,13 +11,11 @@ inherit distutils-r1 xdg-utils git-r3
 
 DESCRIPTION="Jabber client written in PyGTK"
 HOMEPAGE="https://www.gajim.org/"
-SRC_URI="https://www.gajim.org/downloads/$(ver_cut 1-2)/${P}.tar.bz2"
 EGIT_REPO_URI="https://dev.gajim.org/gajim/gajim.git"
 
 LICENSE="GPL-3"
 SLOT="0"
-#KEYWORDS="~amd64 ~arm ~ppc ~ppc64 ~x86"
-KEYWORDS="~amd64 ~x86"
+KEYWORDS=""
 IUSE="+crypt geolocation jingle omemo remote rst +spell upnp +webp"
 
 DISTUTILS_USE_SETUPTOOLS=bdepend
