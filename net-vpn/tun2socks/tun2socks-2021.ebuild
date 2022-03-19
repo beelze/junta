@@ -6,7 +6,7 @@ inherit eutils cmake-utils toolchain-funcs
 
 DESCRIPTION="tun2socks proxifier"
 HOMEPAGE="https://github.com/ambrop72/badvpn https://code.google.com/p/badvpn/"
-SRC_URI="https://github.com/ambrop72/badvpn/archive/${PV}.tar.gz -> ${P}.tar.gz"
+SRC_URI="https://megaseed.kz/portage/${P}.tgz"
 
 LICENSE="BSD"
 KEYWORDS="~amd64"
@@ -23,7 +23,3 @@ src_configure() {
 	)
 	cmake-utils_src_configure
 }
-
-# src_install() {
-#     cmake-utils_src_install
-# }
