@@ -20,6 +20,7 @@ src_configure() {
 	local mycmakeargs=(
 	    -DBUILD_NOTHING_BY_DEFAULT=1
 	    -DBUILD_TUN2SOCKS=1
+	    -DBUILD_UDPGW=1
 	)
 	cmake-utils_src_configure
 }
