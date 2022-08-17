@@ -46,6 +46,9 @@ DEPEND="${RDEPEND}
 	sys-devel/gettext
 	virtual/pkgconfig
 	"
+PATCHES=(
+	"${FILESDIR}"/libnotify.patch
+)
 
 src_configure() {
 	meson_src_configure \
