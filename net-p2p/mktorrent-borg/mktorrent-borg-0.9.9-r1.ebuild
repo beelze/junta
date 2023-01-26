@@ -2,7 +2,7 @@
 # Distributed under the terms of the GNU General Public License v2
 # $Header: /var/cvsroot/gentoo-x86/net-p2p/mktorrent-borg/mktorrent-borg-0.9.9.ebuild,v 1.1 2008/05/05 15:09:43 armin76 Exp $
 
-EAPI=5
+EAPI=7
 inherit eutils toolchain-funcs
 
 DESCRIPTION="Console .torrent file creator. It support Multi Trackers (tier groups)"
@@ -14,12 +14,11 @@ SLOT="0"
 KEYWORDS="~x86"
 IUSE=""
 
-S="${WORKDIR}/${PN%-borg}"
+PATCHES=(
+    $FILESDIR/increase_chunk.patch
+    $FILESDIR/fractional_percents.patch )
 
-src_prepare() {
-	epatch $FILESDIR/increase_chunk.patch
-	epatch $FILESDIR/fractional_percents.patch
-}
+S="${WORKDIR}/${PN%-borg}"
 
 src_unpack() {
 	unpack ${A}

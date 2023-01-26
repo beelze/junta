@@ -1,8 +1,8 @@
 # Copyright 1999-2015 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI=5
-inherit eutils cmake-utils toolchain-funcs
+EAPI=7
+inherit eutils cmake toolchain-funcs
 
 DESCRIPTION="tun2socks proxifier"
 HOMEPAGE="https://github.com/ambrop72/badvpn https://code.google.com/p/badvpn/"
@@ -22,5 +22,5 @@ src_configure() {
 	    -DBUILD_TUN2SOCKS=1
 	    -DBUILD_UDPGW=1
 	)
-	cmake-utils_src_configure
+	cmake_src_configure
 }
