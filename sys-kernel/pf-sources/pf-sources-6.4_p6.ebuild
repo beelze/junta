@@ -2,13 +2,13 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
-SLOT=6.3_p5
+SLOT=6.4_p6
 
 # Define what default functions to run.
 ETYPE="sources"
 
 # Use genpatches but don't include the 'experimental' use flag.
-K_EXP_GENPATCHES_NOUSE="1"
+K_EXP_GENPATCHES_NOUSE="11"
 
 # Genpatches version to use. -pf patch set already includes vanilla linux updates. Regularly "1"
 # is the wanted value here, but the genpatches patch set can be bumped if it includes some

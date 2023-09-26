@@ -2,6 +2,7 @@
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
+SLOT=6.4_p5
 
 # Define what default functions to run.
 ETYPE="sources"
