@@ -1,8 +1,8 @@
 # Copyright 1999-2015 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI=7
-inherit eutils cmake toolchain-funcs
+EAPI=8
+inherit cmake toolchain-funcs
 
 DESCRIPTION="tun2socks proxifier"
 HOMEPAGE="https://github.com/ambrop72/badvpn https://code.google.com/p/badvpn/"
