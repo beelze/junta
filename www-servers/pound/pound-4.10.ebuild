@@ -173,6 +173,8 @@ src_install() {
 	#	install
 	# Again, verify the Makefiles!  We don't want anything falling
 	# outside of ${D}.
+	newconfd "${FILESDIR}"/${P}.confd ${PN}
+	newinitd "${FILESDIR}"/${P}.initd ${PN}
 	insinto /etc
-	newins "${FILESDIR}"/${P}.cfg pound.cfg
+	newins "${FILESDIR}"/${P}.cfg ${PN}.cfg
 }

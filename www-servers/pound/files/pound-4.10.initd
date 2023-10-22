@@ -1,0 +1,30 @@
+#!/sbin/openrc-run
+
+BIN=/usr/sbin/pound
+PIDFILE=/run/pound.pid
+
+depend() {
+    need net
+    use logger dns
+}
+
+checkconfig() {
+    if [[ ! -f "${POUND_CONF}" ]] ; then
+        ewarn "${POUND_CONF} does not exist."
+        return 1
+    fi
+    $BIN -c -f ${POUND_CONF} >/dev/null
+}
+
+start() {
+    checkconfig || return 1
+    ebegin "Starting $RC_SVCNAME"
+    start-stop-daemon --start --quiet --exec $BIN -- -f "$POUND_CONF" -p "$PIDFILE"
+    eend $?
+}
+
+stop() {
+    ebegin "Stopping $RC_SVCNAME"
+    start-stop-daemon --stop --quiet --pidfile "$PIDFILE"
+    eend $?
+}
