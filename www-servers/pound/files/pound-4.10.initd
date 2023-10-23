@@ -19,7 +19,7 @@ checkconfig() {
 start() {
     checkconfig || return 1
     ebegin "Starting $RC_SVCNAME"
-    start-stop-daemon --start --quiet --exec $BIN -- -f "$POUND_CONF" -p "$PIDFILE"
+    start-stop-daemon --start --quiet --pidfile "$PIDFILE" --exec $BIN -- -f "$POUND_CONF" -p "$PIDFILE"
     eend $?
 }
 
