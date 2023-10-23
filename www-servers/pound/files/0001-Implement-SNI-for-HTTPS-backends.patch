@@ -1,0 +1,150 @@
+From bcb10cbcf1a036b2d9a38cde91b7dfad7577347e Mon Sep 17 00:00:00 2001
+From: Sergey Poznyakoff <gray@gnu.org>
+Date: Sun, 22 Oct 2023 19:39:16 +0000
+Subject: [PATCH] Implement SNI for HTTPS backends
+
+* src/pound.h (be_regular): New field: servername.
+* src/config.c (disable_proto): Fix improper dereferencing of call_data.
+(backend_parse_servername): New function.
+(backend_parsetab): New statement: ServerName.
+* src/http.c (send_to_backend): Rewrite Host: header if servername is
+set in the backend.
+(open_backend): Set SNI if servername is set.
+* doc/pound.8: Document changes.
+---
+ doc/pound.8  | 10 +++++++++-
+ src/config.c | 22 +++++++++++++++++++++-
+ src/http.c   | 22 ++++++++++++++++++++++
+ src/pound.h  |  1 +
+ 4 files changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/doc/pound.8 b/doc/pound.8
+index 99e46ff..95f75e3 100644
+--- a/doc/pound.8
++++ b/doc/pound.8
+@@ -14,7 +14,7 @@
+ .\"
+ .\" You should have received a copy of the GNU General Public License
+ .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
+-.TH POUND 8 "October 10, 2023" "pound" "System Manager's Manual"
++.TH POUND 8 "October 22, 2023" "pound" "System Manager's Manual"
+ .SH NAME
+ pound \- HTTP/HTTPS reverse-proxy and load-balancer
+ .SH SYNOPSIS
+@@ -1770,6 +1770,14 @@ parameter for non Unix-domain backends.
+ \fBHTTPS\fR
+ The backend is using HTTPS.
+ .TP
++\fBServerName\fR "\fIname\fR"
++Specify the name to use for server name identification (\fBSNI\fR).
++This directive also rewrites the \fBHost:\fR header for this
++particular backend.  This means you don't have to use \fBSetHeader\fR
++in addition to it.
++.IP
++This directive may appear only after the \fBHTTPS\fR directive.
++.TP
+ \fBCert\fR "\fIfilename\fR"
+ Specify the certificate that
+ .B pound
+diff --git a/src/config.c b/src/config.c
+index b7e3150..101f238 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -2004,6 +2004,25 @@ backend_assign_ciphers (void *call_data, void *section_data)
+   return PARSER_OK;
+ }
+ 
++static int
++backend_parse_servername (void *call_data, void *section_data)
++{
++  BACKEND *be = call_data;
++  struct token *tok;
++
++  if (be->v.reg.ctx == NULL)
++    {
++      conf_error ("%s", "HTTPS must be used before this statement");
++      return PARSER_FAIL;
++    }
++
++  if ((tok = gettkn_expect (T_STRING)) == NULL)
++    return PARSER_FAIL;
++  be->v.reg.servername = xstrdup (tok->str);
++
++  return PARSER_OK;
++}
++
+ static int
+ backend_assign_priority (void *call_data, void *section_data)
+ {
+@@ -2051,7 +2070,7 @@ set_proto_opt (int *opt)
+ static int
+ disable_proto (void *call_data, void *section_data)
+ {
+-  SSL_CTX *ctx = call_data;
++  SSL_CTX *ctx = *(SSL_CTX**) call_data;
+   int n = 0;
+ 
+   if (ctx == NULL)
+@@ -2081,6 +2100,7 @@ static PARSER_TABLE backend_parsetab[] = {
+   { "Ciphers",   backend_assign_ciphers },
+   { "Disable",   disable_proto,  NULL, offsetof (BACKEND, v.reg.ctx) },
+   { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
++  { "ServerName",backend_parse_servername, NULL },
+   { NULL }
+ };
+ 
+diff --git a/src/http.c b/src/http.c
+index 6aae4ca..9c96771 100644
+--- a/src/http.c
++++ b/src/http.c
+@@ -3549,6 +3549,26 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
+ 	lognomem ();
+     }
+ 
++  if (phttp->backend->v.reg.servername)
++    {
++      struct stringbuf sb;
++      char *hf;
++      int rc;
++
++      stringbuf_init_log (&sb);
++      stringbuf_printf (&sb, "Host: %s", phttp->backend->v.reg.servername);
++      hf = stringbuf_finish (&sb);
++      if (!hf)
++	{
++	  stringbuf_free (&sb);
++	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
++	}
++      rc = http_header_list_append (&phttp->request.headers, hf, H_REPLACE);
++      stringbuf_free (&sb);
++      if (rc)
++	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
++    }
++
+   if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
+ 		     phttp)
+       || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
+@@ -3670,6 +3690,8 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
+ 	  logmsg (LOG_WARNING, "(%"PRItid") be SSL_new: failed", POUND_TID ());
+ 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
+ 	}
++      if (backend->v.reg.servername)
++	SSL_set_tlsext_host_name (be_ssl, backend->v.reg.servername);
+       SSL_set_bio (be_ssl, phttp->be, phttp->be);
+       if ((bb = BIO_new (BIO_f_ssl ())) == NULL)
+ 	{
+diff --git a/src/pound.h b/src/pound.h
+index d1ec456..665ecae 100644
+--- a/src/pound.h
++++ b/src/pound.h
+@@ -413,6 +413,7 @@ struct be_regular
+   unsigned conn_to;	/* connection time-out */
+   unsigned ws_to;	/* websocket time-out */
+   SSL_CTX *ctx;		/* CTX for SSL connections */
++  char *servername;     /* SNI */
+ };
+ 
+ struct be_redirect
+-- 
+2.41.0
+

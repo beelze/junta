@@ -107,6 +107,7 @@ DOCS=( README )
 
 src_prepare() {
 	eautoreconf
+	eapply "${FILESDIR}"/0001-Implement-SNI-for-HTTPS-backends.patch || die
 	eapply_user
 }
 # The following src_configure function is implemented as default by portage, so
