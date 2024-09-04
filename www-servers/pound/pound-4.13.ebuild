@@ -1,4 +1,4 @@
-# Copyright 1999-2023 Gentoo Authors
+# Copyright 1999-2024 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 # NOTE: The comments in this file are for instruction and documentation.
@@ -30,7 +30,7 @@ HOMEPAGE="https://github.com/graygnuorg/pound"
 
 # Point to any required sources; these will be automatically downloaded by
 # Portage.
-SRC_URI="https://github.com/graygnuorg/pound/releases/download/v4.10/${P}.tar.gz"
+SRC_URI="https://github.com/graygnuorg/pound/releases/download/v${PV}/${P}.tar.gz"
 
 # Source directory; the dir where the sources can be found (automatically
 # unpacked) inside ${WORKDIR}.  The default value for S is ${WORKDIR}/${P}
@@ -72,7 +72,7 @@ SLOT="0"
 # exists for.  If the package was for an x86 binary package, then
 # KEYWORDS would be set like this: KEYWORDS="-* x86"
 # Do not use KEYWORDS="*"; this is not valid in an ebuild context.
-KEYWORDS="~amd64"
+KEYWORDS="amd64 ~hppa ~ppc x86"
 
 # Comprehensive list of any and all USE flags leveraged in the ebuild,
 # with some exceptions, e.g., ARCH specific flags like "amd64" or "ppc".
@@ -91,23 +91,25 @@ KEYWORDS="~amd64"
 # had installed on your system when you tested the package.  Then
 # other users hopefully won't be caught without the right version of
 # a dependency.
-RDEPEND=">=dev-libs/openssl-3.0
-		 virtual/libcrypt:="
 
-# Build-time dependencies that need to be binary compatible with the system
-# being built (CHOST). These include libraries that we link against.
-# The below is valid if the same run-time depends are required to compile.
-DEPEND="${RDEPEND}"
+DEPEND="
+	dev-libs/openssl:=
+	dev-libs/libpcre2:=
+"
+RDEPEND="
+	${DEPEND}
+	virtual/libcrypt:=
+"
 
-# Build-time dependencies that are executed during the emerge process, and
-# only need to be present in the native build system (CBUILD). Example:
-#BDEPEND="virtual/pkgconfig"
+QA_CONFIG_IMPL_DECL_SKIP=(
+	PCRE2regcomp	# Detecting broken Debian patched PCRE2
+)
 
 DOCS=( README )
 
 src_prepare() {
+	default
 	eautoreconf
-	eapply "${FILESDIR}"/0001-Implement-SNI-for-HTTPS-backends.patch || die
 	eapply_user
 }
 # The following src_configure function is implemented as default by portage, so
