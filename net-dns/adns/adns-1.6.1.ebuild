@@ -5,19 +5,18 @@ EAPI=8
 
 DESCRIPTION="Advanced, easy to use, asynchronous-capable DNS client library and utilities."
 HOMEPAGE="http://www.chiark.greenend.org.uk/~ian/adns/"
-SRC_URI="https://www.chiark.greenend.org.uk/~ian/adns/ftp/${P}.tar.gz"
 
+SRC_URI="https://www.chiark.greenend.org.uk/~ian/adns/ftp/${P}.tar.gz"
 LICENSE="GPL-2+"
 SLOT="0"
 KEYWORDS="~amd64"
 
-# src_configure() {
-# 	econf --with-posix-regex
-# }
 
 src_install() {
+	local _d
+	for _d in src dynamic client regress; do
+		sed -i -e 's:\$(DESTDIR)\$:\$:' $_d/Makefile || die
+	done
 	emake DESTDIR="${D}" install
-	# emake DESTDIR="${ED}" PREFIX=/usr install
-
 	dodoc NEWS README
 }
