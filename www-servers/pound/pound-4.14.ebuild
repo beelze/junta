@@ -3,19 +3,14 @@
 
 EAPI=8
 inherit autotools
+
 DESCRIPTION="A http/https reverse-proxy and load-balancer"
 HOMEPAGE="https://github.com/graygnuorg/pound"
-LICENSE="GPL-3"
-if [ "${PV}" == "9999" ]; then
-	inherit git-r3
-	EGIT_REPO_URI="https://github.com/graygnuorg/pound.git"
-#	EGIT_BRANCH=resolver
-else
-	SRC_URI="https://github.com/graygnuorg/pound/releases/download/v${PV}/${P}.tar.gz"
-	KEYWORDS="amd64 ~hppa ~ppc x86"
-fi
+SRC_URI="https://github.com/graygnuorg/pound/releases/download/v${PV}/${P}.tar.gz"
 
+LICENSE="GPL-3"
 SLOT="0"
+KEYWORDS="amd64 ~hppa ~ppc x86"
 
 DEPEND="
 	dev-libs/openssl:=
@@ -31,16 +26,17 @@ QA_CONFIG_IMPL_DECL_SKIP=(
 	PCRE2regcomp	# Detecting broken Debian patched PCRE2
 )
 
-# DOCS=( README )
+DOCS=( README )
 
 src_prepare() {
 	default
 	eautoreconf
 	eapply_user
 }
-src_configure() {
-	econf --with-owner=root --with-group=root
-}
+
+# src_configure() {
+# 	econf --with-owner=root --with-group=root
+# }
 
 src_install() {
 	default
