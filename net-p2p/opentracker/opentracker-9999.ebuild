@@ -1,51 +1,45 @@
-# Copyright 1999-2020 Gentoo Authors
+# Copyright 1999-2024 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI=7
+EAPI=8
 
-EGIT_REPO_URI="https://github.com/flygoast/${PN}.git"
-
-MY_P="unofficial-v${PV}"
+EGIT_REPO_URI="https://erdgeist.org/gitweb/opentracker"
 
 declare -A FLAGS
-FLAGS=( [blacklist]="DWANT_ACCESSLIST_BLACK"
-	[gzip]="DWANT_COMPRESSION_GZIP$"
+FLAGS=(
+	[ipv4-only]="DWANT_V4_ONLY"
+	[gzip]='include +Makefile\.gzip'
 	[gzip-always]="DWANT_COMPRESSION_GZIP_ALWAYS"
-	[ip-from-query]="DWANT_IP_FROM_QUERY_STRING"
-	[ip-from-proxy]="DWANT_IP_FROM_PROXY"
-	[ipv6]="DWANT_V6"
-	[fullscrapes]="DWANT_FULLSCRAPE"
-	[fullscrapes-modest]="DWANT_MODEST_FULLSCRAPES"
-	[live-sync]="DWANT_SYNC_LIVE"
-	[live-sync-unicast]="DSYNC_LIVE_UNICAST"
-	[log-networks-full]="DWANT_FULLLOG_NETWORKS"
-	[log-numwant]="DWANT_LOG_NUMWANT"
-	[persistence]="DWANT_PERSISTENCE"
-	[spot-woodpeckers]="DWANT_SPOT_WOODPECKER"
-	[syslog]="DWANT_SYSLOG"
-	[restrict-stats]="DWANT_RESTRICT_STATS"
+	[blacklist]="DWANT_ACCESSLIST_BLACK"
 	[whitelist]="DWANT_ACCESSLIST_WHITE"
-	[httpdebug]="DWANT_HTTPHUMAN"
+	[list-dynamic]="DWANT_DYNAMIC_ACCESSLIST"
+	[live-sync]="DWANT_SYNC_LIVE"
+	[restrict-stats]="DWANT_RESTRICT_STATS"
+	[fullscrape]="DWANT_FULLSCRAPE"
+	[fullscrapes-modest]="DWANT_MODEST_FULLSCRAPES"
+	[query-ip]="DWANT_IP_FROM_QUERY_STRING"
+	[woodpeckers]="DWANT_SPOT_WOODPECKER"
+	[syslog]="DWANT_SYSLOGS"
 )
 
-inherit git-r3 systemd
+inherit git-r3
 
-DESCRIPTION="High-performance bittorrent tracker"
-HOMEPAGE="https://github.com/flygoast/opentracker http://erdgeist.org/arts/software/opentracker/"
+DESCRIPTION="An open and free bittorrent tracker"
+HOMEPAGE="http://erdgeist.org/arts/software/opentracker/"
 SRC_URI=""
 
 LICENSE="BEER-WARE"
 SLOT="0"
 KEYWORDS=""
-IUSE="blacklist debug +gzip gzip-always httpdebug ip-from-query ip-from-proxy ipv6 +fullscrapes fullscrapes-modest live-sync live-sync-unicast log-networks-full log-numwant persistence restrict-stats spot-woodpeckers syslog whitelist"
+IUSE="+ipv4-only +gzip gzip-always blacklist whitelist live-sync restrict-stats +fullscrape fullscrapes-modest query-ip woodpeckers list-dynamic syslog"
 REQUIRED_USE="blacklist? ( !whitelist )
 	gzip-always? ( gzip )
-	gzip? ( fullscrapes )
-	live-sync-unicast? ( live-sync )
-	persistence? ( !ipv6 )"
+	gzip? ( fullscrape )
+    fullscrapes-modest? ( fullscrape )
+    list-dynamic? ( || ( blacklist whitelist ) )"
 
 RDEPEND="acct-user/opentracker
-	dev-libs/libowfat
+	>=dev-libs/libowfat-0.34
 	gzip? ( sys-libs/zlib )"
 
 src_prepare() {
@@ -57,53 +51,41 @@ src_prepare() {
 		-e "s|FEATURES|FEATURES_INTERNAL|g" \
 		-e "s|^FEATURES_INTERNAL|#FEATURES_INTERNAL|g" \
 		-e "s|PREFIX?=..|PREFIX?=/usr|g" \
-		-e "s|LIBOWFAT_HEADERS=libowfat|LIBOWFAT_HEADERS=\$(PREFIX)/include/libowfat|g" \
-		-e "s|-lpthread||g" \
+		-e "s|LIBOWFAT_HEADERS=\$(PREFIX)/libowfat|LIBOWFAT_HEADERS=\$(PREFIX)/include/libowfat|g" \
 		-e "s|-O3||g" \
-		-e "s|-lz||g" \
-		-e "s|strip \$@||g" \
 		-e "s|BINDIR?=\$(PREFIX)/bin|BINDIR?=\$(DESTDIR)\$(PREFIX)/bin/|g" \
-		-e "s|all: owfat|all:|g" \
-		-e "s|install -m 755 ${PN} \$(BINDIR)|install -D -m 755 ${PN} \$(BINDIR)/${PN}|g" \
+		-e "s|install -m 755 ${PN} \$(DESTDIR)\$(BINDIR)|install -D -m 755 ${PN} \$(BINDIR)/${PN}|g" \
 		Makefile || die "sed for src_prepare failed"
 
 	# Define which features to use
 	for flag in "${!FLAGS[@]}" ; do
-		sed -i "$(usex "$flag" /"${FLAGS[$flag]}"/s/^#*// '')" Makefile || die "sed for $flag failed"
+		sed -i "$(usex "$flag" /"${FLAGS[$flag]}"/s/^#*// '')" Makefile Makefile.gzip || die "sed for $flag failed"
 	done
-
-	# Return back -lz flag for gzip
-	sed -i "$(usex gzip /LDFLAGS+/s/$/-lz/ '')" Makefile || die "sed for lz in LDFLAGS failed"
-
-	# Debug build: build opentracker.debug but target as opentracker, and don't build opentracker
-	if use debug; then
-		sed -i \
-			-e "/D_DEBUG_HTTPERROR/s|^#*||g" \
-			-e "s|all: \$(BINARY)|all:|g" \
-			-e "s|\$@ \$(OBJECTS_debug)|opentracker \$(OBJECTS_debug)|g" \
-		Makefile || die "sed for debug object failed"
-	fi
 
 	# Correct config paths
 	sed -i \
-		-e "/access.whitelist/s|/path/to/whitelist|/var/lib/${PN}/access.whitelist|g" \
-		-e "/access.blacklist/s|./blacklist|/var/lib/${PN}/access.blacklist|g" \
-		-e "/tracker.rootdir/s|/usr/local/etc/opentracker|/var/lib/${PN}|g" \
-		-e "/tracker.user/s|nobody|${PN}|g" \
-		-e "/persist.file/s|/path/to/persist.odb|/var/lib/${PN}/${PN}.odb|g" \
+		-e "/access\.whitelist/s|/path/to/whitelist|/access.whitelist|g" \
+		-e "/access\.blacklist/s|./blacklist|/access.blacklist|g" \
+		-e "/access\.fifo_delete/s|/var/run/opentracker/deleter\.fifo|/deleter.fifo|g" \
+		-e "/access\.fifo_add/s|/var/run/opentracker/adder\.fifo|/adder.fifo|g" \
+		-e "/tracker\.rootdir/c\tracker.rootdir /var/lib/${PN}" \
+		-e "/tracker\.user/c\tracker.user ${PN}" \
 		opentracker.conf.sample || die "sed for config failed"
 }
 
 src_install() {
 	default
 
-	doman "${FILESDIR}"/opentracker.8
+	doman man1/opentracker.1
+	doman man4/opentracker.conf.4
 
-	newinitd "${FILESDIR}"/opentracker.initd opentracker
-	newconfd "${FILESDIR}"/opentracker.confd opentracker
-	systemd_dounit "${FILESDIR}"/opentracker.service
+	newinitd "${FILESDIR}/${PF}".initd opentracker
+	newconfd "${FILESDIR}/${PF}".confd opentracker
+	# systemd_dounit "${FILESDIR}"/opentracker.service
 
-	insopts -m 640 -o opentracker -g opentracker
+	insopts -m 644 -o opentracker -g opentracker
+	diropts -m 755 -o opentracker -g opentracker
 	insinto /etc/opentracker
 	newins opentracker.conf.sample opentracker.conf
+	keepdir /var/lib/opentracker
 }

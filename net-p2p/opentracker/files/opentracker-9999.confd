@@ -1,0 +1,5 @@
+# Config file for /etc/init.d/opentracker
+
+# Various options.
+# run `opentracker -h` for valid cmdline options
+OPENTRACKER_OPTS="-f /etc/opentracker/opentracker.conf"
