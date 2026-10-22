@@ -1,4 +1,4 @@
-# Copyright 1999-2024 Gentoo Authors
+# Copyright 1999-2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 EAPI=8
@@ -8,18 +8,13 @@ EGIT_REPO_URI="https://erdgeist.org/gitweb/opentracker"
 declare -A FLAGS
 FLAGS=(
 	[ipv4-only]="DWANT_V4_ONLY"
-	[gzip]='include +Makefile\.gzip'
 	[gzip-always]="DWANT_COMPRESSION_GZIP_ALWAYS"
 	[blacklist]="DWANT_ACCESSLIST_BLACK"
 	[whitelist]="DWANT_ACCESSLIST_WHITE"
-	[list-dynamic]="DWANT_DYNAMIC_ACCESSLIST"
 	[live-sync]="DWANT_SYNC_LIVE"
 	[restrict-stats]="DWANT_RESTRICT_STATS"
 	[fullscrape]="DWANT_FULLSCRAPE"
-	[fullscrapes-modest]="DWANT_MODEST_FULLSCRAPES"
 	[query-ip]="DWANT_IP_FROM_QUERY_STRING"
-	[woodpeckers]="DWANT_SPOT_WOODPECKER"
-	[syslog]="DWANT_SYSLOGS"
 )
 
 inherit git-r3
@@ -31,16 +26,12 @@ SRC_URI=""
 LICENSE="BEER-WARE"
 SLOT="0"
 KEYWORDS=""
-IUSE="+ipv4-only +gzip gzip-always blacklist whitelist live-sync restrict-stats +fullscrape fullscrapes-modest query-ip woodpeckers list-dynamic syslog"
-REQUIRED_USE="blacklist? ( !whitelist )
-	gzip-always? ( gzip )
-	gzip? ( fullscrape )
-    fullscrapes-modest? ( fullscrape )
-    list-dynamic? ( || ( blacklist whitelist ) )"
+IUSE="+ipv4-only gzip-always blacklist whitelist live-sync restrict-stats +fullscrape query-ip"
+REQUIRED_USE="blacklist? ( !whitelist )"
 
 RDEPEND="acct-user/opentracker
 	>=dev-libs/libowfat-0.34
-	gzip? ( sys-libs/zlib )"
+	sys-libs/zlib"
 
 src_prepare() {
 	default
@@ -76,8 +67,8 @@ src_prepare() {
 src_install() {
 	default
 
-	doman man1/opentracker.1
-	doman man4/opentracker.conf.4
+	# doman man1/opentracker.1
+	# doman man4/opentracker.conf.4
 
 	newinitd "${FILESDIR}/${PF}".initd opentracker
 	newconfd "${FILESDIR}/${PF}".confd opentracker
@@ -85,7 +76,7 @@ src_install() {
 
 	insopts -m 644 -o opentracker -g opentracker
 	diropts -m 755 -o opentracker -g opentracker
-	insinto /etc/opentracker
-	newins opentracker.conf.sample opentracker.conf
-	keepdir /var/lib/opentracker
+	# insinto /etc/opentracker
+	# newins opentracker.conf.sample opentracker.conf
+	# keepdir /var/lib/opentracker
 }
